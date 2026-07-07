@@ -518,8 +518,21 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
 
             if (roll.Bomb)
             {
-                if (!SlotOptions.SkipCelebration) Explode();
-                SetResult(SlotLoc.Ui("BOMB_BUST"), StsColors.red);
+                if (!SlotOptions.SkipCelebration)
+                {
+                    // tease the reward the player ALMOST won — a quick fountain of it — then blow it away.
+                    if (roll.MissedRelic?.Icon != null)
+                        _shower?.Burst(12, ShowerOrigin(), ReelIconSize, roll.MissedRelic.Icon);
+                    else if (roll.MissedGold > 0)
+                        _shower?.Burst(Mathf.Clamp(roll.MissedGold / 10, 4, 40), ShowerOrigin(), ReelIconSize, _shopCoinTex);
+                    await ToSignal(tree.CreateTimer(0.55), SceneTreeTimer.SignalName.Timeout);
+                    if (!Alive()) return;
+                    Explode();   // scatters the just-spawned reward — snatched away
+                }
+                string bombMsg = roll.MissedRelic != null ? SlotLoc.Ui("BOMB_MISS_RELIC")
+                               : roll.MissedGold > 0 ? string.Format(SlotLoc.Ui("BOMB_MISS_GOLD"), roll.MissedGold)
+                               : SlotLoc.Ui("BOMB_BUST");
+                SetResult(bombMsg, StsColors.red);
             }
             else
             {

@@ -23,6 +23,8 @@ internal static class SlotLoc
         ["UI.SPINNING"]        = ("Spin!", "스핀!", "旋转！"),
         ["UI.NOT_ENOUGH_GOLD"] = ("Not enough gold (need {0})", "골드 부족 (필요 {0})", "金币不足（需要 {0}）"),
         ["UI.BOMB_BUST"]       = ("BOMB!  All rewards lost", "폭탄!  모든 보상 소멸", "炸弹！所有奖励消失"),
+        ["UI.BOMB_MISS_RELIC"] = ("BOMB!  Relic lost… so close", "폭탄!  유물 놓침… 아깝다", "炸弹！痛失遗物…就差一点"),
+        ["UI.BOMB_MISS_GOLD"]  = ("BOMB!  {0} gold lost… so close", "폭탄!  {0} 골드 놓침… 아깝다", "炸弹！痛失{0}金币…就差一点"),
         ["UI.RELIC_WON"]       = ("★ Relic won! ★", "★ 유물 획득! ★", "★ 获得遗物！★"),
         ["UI.BINGO_GOLD"]      = ("★ {0} bingo  +{1} gold ★", "★ {0}빙고  +{1} 골드 ★", "★ {0}连线  +{1}金币 ★"),
         ["UI.LOSE"]            = ("Miss…  -{0} gold", "꽝…  -{0} 골드", "未中…  -{0}金币"),

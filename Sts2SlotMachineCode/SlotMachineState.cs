@@ -29,6 +29,8 @@ internal sealed class SpinResult
     internal readonly List<SlotSymbol> Grants = new();   // shop relics to grant
     internal bool Bomb;
     internal int Bingos;
+    internal SlotSymbol? MissedRelic;   // a bomb spin teases this would-be relic win (then voids it)
+    internal int MissedGold;            // a bomb spin teases this would-be gold (then voids it)
 }
 
 /// <summary>
@@ -257,9 +259,51 @@ internal sealed class SlotMachineState
 
     private void BuildBomb(SpinResult res)
     {
-        BuildLose(res);
-        res.Grid[_rng.Next(3), _rng.Next(3)] = _bombIdx;
-        res.Bomb = true; res.Gold = 0; res.Bingos = 0;
+        // A bomb doesn't just miss — it TEASES. Build a would-be win (a middle-row relic triple, or a
+        // couple of gold bingo lines), then drop the bomb on a cell OUTSIDE that winning line: the reward
+        // is fully visible but voided. Feels like it was snatched away right at the finish.
+        bool teaseRelic = _shopIdx.Count > 0 && _rng.Next(100) < 60;
+        var freeRows = new List<int>();
+
+        if (teaseRelic)
+        {
+            int shop = _shopIdx[_rng.Next(_shopIdx.Count)];
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                FillLoseRow(res.Grid, 0);
+                FillLoseRow(res.Grid, 2);
+                for (int c = 0; c < 3; c++) res.Grid[c, 1] = shop;   // middle row = would-be relic win
+                if (CountBingos(res.Grid) == 1) break;
+            }
+            freeRows.Add(0); freeRows.Add(2);
+            res.MissedRelic = Symbols[shop];
+        }
+        else
+        {
+            int n = 1 + _rng.Next(2);           // tease 1 or 2 gold lines (always leaves a row for the bomb)
+            var winRows = new List<int>();
+            for (int attempt = 0; attempt < 100; attempt++)
+            {
+                winRows.Clear();
+                var rows = new List<int> { 0, 1, 2 };
+                for (int i = rows.Count - 1; i > 0; i--) { int j = _rng.Next(i + 1); (rows[i], rows[j]) = (rows[j], rows[i]); }
+                var used = new HashSet<int>();
+                for (int i = 0; i < 3; i++)
+                {
+                    if (i < n) { int s = RandomFillerExcept(used); used.Add(s); for (int c = 0; c < 3; c++) res.Grid[c, rows[i]] = s; winRows.Add(rows[i]); }
+                    else FillLoseRow(res.Grid, rows[i]);
+                }
+                if (CountBingos(res.Grid) == n) break;
+            }
+            for (int r2 = 0; r2 < 3; r2++) if (!winRows.Contains(r2)) freeRows.Add(r2);
+            res.MissedGold = GoldForBingos(n);
+        }
+
+        // drop the bomb on a non-winning cell so the teased line stays visually intact
+        int brow = freeRows.Count > 0 ? freeRows[_rng.Next(freeRows.Count)] : _rng.Next(3);
+        res.Grid[_rng.Next(3), brow] = _bombIdx;
+
+        res.Bomb = true; res.Gold = 0; res.Bingos = 0; res.Grants.Clear();   // bomb voids everything
     }
 
     private void BuildRelic(SpinResult res)
