@@ -1,0 +1,23 @@
+# Godot 4+
+.godot/
+*.translation
+
+# .NET / Rider / VS / Claude Code
+bin/
+obj/
+.idea/
+.vs/
+.claude/
+*.user
+*.suo
+
+# Local-only build overrides
+local.props
+
+# Logs / runtime artifacts
+*.log
+
+# Release zips at repo root + staging dir used to build them
+/Sts2SlotMachine-v*.zip
+/_release_staging/
+/_release_verify/

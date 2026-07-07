@@ -1,0 +1,34 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+    <Import Project="..\Sts2.ModKit\build\Sts2.ModKit.props" />
+
+    <PropertyGroup>
+        <RootNamespace>Sts2SlotMachine</RootNamespace>
+        <AssemblyName>Sts2SlotMachine</AssemblyName>
+    </PropertyGroup>
+
+    <!-- Loose runtime-loaded art (cabinet / hover glow / lever), loaded next to the DLL so it can be
+         swapped without a rebuild. Copied only if absent, so a user's replaced art isn't overwritten. -->
+    <Target Name="CopySlotArtToModsFolder" AfterTargets="Sts2ModKit_CopyToModsFolder">
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_machine_cabinet.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/slot_machine_cabinet.png') And !Exists('$(Sts2ModOutputDir)/slot_machine_cabinet.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_machine_glow.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/slot_machine_glow.png') And !Exists('$(Sts2ModOutputDir)/slot_machine_glow.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_machine_lever.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/slot_machine_lever.png') And !Exists('$(Sts2ModOutputDir)/slot_machine_lever.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/ui_back.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/ui_back.png') And !Exists('$(Sts2ModOutputDir)/ui_back.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/ui_arrow.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/ui_arrow.png') And !Exists('$(Sts2ModOutputDir)/ui_arrow.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_bomb.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/slot_bomb.png') And !Exists('$(Sts2ModOutputDir)/slot_bomb.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_explosion.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/slot_explosion.png') And !Exists('$(Sts2ModOutputDir)/slot_explosion.png')" />
+    </Target>
+</Project>
