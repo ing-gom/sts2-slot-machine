@@ -32,7 +32,7 @@ public class MainFile
     private static void RegisterConfig()
     {
         // Register FIRST, then read (a GetValue before Register returns default(T) for an unknown key).
-        ModConfigBridge.For(ModId, "Shop Slot Machine", Logger)
+        ModConfigBridge.For(ModId, "Lucky Relic Reels", Logger)
             .Toggle(EntryKeySkipFx, "당첨 연출 끄기 (분수·폭발)", defaultValue: false,
                 onChanged: v => SlotOptions.SkipCelebration = v)
                 .Description("당첨 시 코인/유물 분수와 폭탄 폭발 연출을 끕니다. 결과는 그대로 지급됩니다.")

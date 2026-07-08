@@ -1,6 +1,6 @@
-# StS2 Shop Slot Machine
+# Lucky Relic Reels
 
-A **Slay the Spire 2** mod that drops a **slot machine cabinet** into the merchant's shop. Pull the lever, spend a little gold, and gamble for **gold — or a free relic**. Pure fun, no balance pretense: it's tuned to *slowly* lose (RTP ~95%) while still raining rewards on you.
+A **Slay the Spire 2** mod that drops a **cabinet of spinning reels** into the merchant's shop. Pull the lever, spend a little gold, and try your luck for **gold — or a free relic**. Pure fun, no balance pretense: it's tuned to *slowly* lose (RTP ~95%) while still raining rewards on you.
 
 [한국어 README](README.ko.md)
 
