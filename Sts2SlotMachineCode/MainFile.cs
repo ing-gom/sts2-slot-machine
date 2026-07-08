@@ -33,16 +33,17 @@ public class MainFile
     private static void RegisterConfig()
     {
         // Register FIRST, then read (a GetValue before Register returns default(T) for an unknown key).
+        // Labels/descriptions are localized (en/ko/zh) via SlotLoc — resolved to the game's language now.
         ModConfigBridge.For(ModId, "Lucky Relic Reels", Logger)
-            .Toggle(EntryKeySkipFx, "당첨 연출 끄기 (분수·폭발)", defaultValue: false,
+            .Toggle(EntryKeySkipFx, SlotLoc.Ui("CFG_FX_LABEL"), defaultValue: false,
                 onChanged: v => SlotOptions.SkipCelebration = v)
-                .Description("당첨 시 코인/유물 분수와 폭탄 폭발 연출을 끕니다. 결과는 그대로 지급됩니다.")
-            .Toggle(EntryKeySkipSpin, "릴 회전 애니 스킵", defaultValue: false,
+                .Description(SlotLoc.Ui("CFG_FX_DESC"))
+            .Toggle(EntryKeySkipSpin, SlotLoc.Ui("CFG_SPIN_LABEL"), defaultValue: false,
                 onChanged: v => SlotOptions.SkipSpin = v)
-                .Description("릴이 도는 애니메이션 없이 결과가 즉시 표시됩니다.")
-            .Toggle(EntryKeyManual, "수동 정지 (릴을 직접 멈춤)", defaultValue: false,
+                .Description(SlotLoc.Ui("CFG_SPIN_DESC"))
+            .Toggle(EntryKeyManual, SlotLoc.Ui("CFG_MANUAL_LABEL"), defaultValue: false,
                 onChanged: v => SlotOptions.ManualStop = v)
-                .Description("릴이 계속 돌고, STOP 버튼으로 릴을 하나씩 직접 멈춥니다. 멈춘 자리가 곧 결과 — 확률표가 아니라 타이밍이 결정합니다. (‘릴 회전 애니 스킵’이 켜져 있으면 무시)")
+                .Description(SlotLoc.Ui("CFG_MANUAL_DESC"))
             .Register();
 
         SlotOptions.SkipCelebration = ModConfigBridge.GetValue<bool>(ModId, EntryKeySkipFx, false);

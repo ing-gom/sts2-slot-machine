@@ -41,6 +41,21 @@ internal static class SlotLoc
         ["UI.BINGO_FULL_NP"]   = ("Full  {0}g", "가득  {0}골드", "全满  {0}金币"),
         ["UI.BOMB_LABEL"]      = ("All rewards lost", "모든 보상 소멸", "所有奖励消失"),
         ["UI.LOSE_LABEL"]      = ("Miss", "꽝", "未中"),
+
+        // ModConfig option labels + descriptions (the in-game settings tab). Fed to ModConfigBridge, which
+        // takes plain strings — so localization happens here, resolved to the game's language at register time.
+        ["UI.CFG_FX_LABEL"]     = ("Skip win/bomb effects", "당첨 연출 끄기 (분수·폭발)", "关闭中奖/炸弹特效"),
+        ["UI.CFG_FX_DESC"]      = ("Turns off the coin/relic fountain and the bomb explosion. Rewards still pay out.",
+                                   "당첨 시 코인/유물 분수와 폭탄 폭발 연출을 끕니다. 결과는 그대로 지급됩니다.",
+                                   "关闭金币/遗物喷泉与炸弹爆炸特效。奖励照常发放。"),
+        ["UI.CFG_SPIN_LABEL"]   = ("Skip reel-spin animation", "릴 회전 애니 스킵", "跳过转轮动画"),
+        ["UI.CFG_SPIN_DESC"]    = ("Results appear instantly, with no spinning animation.",
+                                   "릴이 도는 애니메이션 없이 결과가 즉시 표시됩니다.",
+                                   "结果立即显示，没有旋转动画。"),
+        ["UI.CFG_MANUAL_LABEL"] = ("Manual stop (stop the reels yourself)", "수동 정지 (릴을 직접 멈춤)", "手动停止（自行停下转轮）"),
+        ["UI.CFG_MANUAL_DESC"]  = ("The reels keep spinning; use the STOP button to stop each one. Where they land is the result — your timing decides, not the odds table. (Ignored when 'Skip reel-spin animation' is on.)",
+                                   "릴이 계속 돌고, STOP 버튼으로 릴을 하나씩 직접 멈춥니다. 멈춘 자리가 곧 결과 — 확률표가 아니라 타이밍이 결정합니다. ('릴 회전 애니 스킵'이 켜져 있으면 무시)",
+                                   "转轮持续旋转，用 STOP 按钮逐个停下。停在哪里就是结果 —— 由你的时机决定，而非概率表。（开启'跳过转轮动画'时忽略）"),
     };
 
     private static string? _builtLang;
