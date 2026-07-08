@@ -524,7 +524,12 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     {
         if (_busy || _closed) return;
         int bet = BetAmount;
-        if (_player.Gold < bet) { SetResult(string.Format(SlotLoc.Ui("NOT_ENOUGH_GOLD"), bet), StsColors.red); return; }
+        if (_player.Gold < bet)
+        {
+            SetResult(string.Format(SlotLoc.Ui("NOT_ENOUGH_GOLD"), bet), StsColors.red);
+            StartLever(0f, 0.3, Tween.TransitionType.Elastic);   // not enough gold → spring the lever back, no spin
+            return;
+        }
 
         _busy = true;
         UpdateInfo();

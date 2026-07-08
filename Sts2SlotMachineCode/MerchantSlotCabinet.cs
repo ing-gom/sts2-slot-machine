@@ -58,7 +58,7 @@ internal sealed partial class MerchantSlotCabinet : Control
                   ?? _room.Inventory?.Inventory?.Player
                   ?? RunManager.Instance.State?.Players.FirstOrDefault();
 
-        _state = SlotMachineState.Build(_room.Inventory);   // symbol pool: shop relics + value relics (shared with the popup)
+        _state = SlotMachineState.Build(_room.Inventory, _player);   // symbol pool: shop relics + value relics (shared with the popup)
 
         Texture2D? cabTex = LoadPng("slot_machine_cabinet.png");
         if (cabTex == null)

@@ -45,7 +45,7 @@ public class SlotTestCmd : AbstractConsoleCmd
         }
 
         var shop = FindShop();
-        var state = SlotMachineState.Build(shop);
+        var state = SlotMachineState.Build(shop, issuingPlayer);
         if (args.Length >= 1)
         {
             if (!Outcomes.Contains(args[0], StringComparer.OrdinalIgnoreCase))

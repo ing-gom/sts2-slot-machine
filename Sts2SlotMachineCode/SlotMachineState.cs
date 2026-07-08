@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
+using MegaCrit.Sts2.Core.Entities.Players;     // Player (owned-relic check for the 1-time jackpot)
 using MegaCrit.Sts2.Core.Entities.Relics;      // RelicRarity
 using MegaCrit.Sts2.Core.Helpers;              // StringHelper.Slugify
 using MegaCrit.Sts2.Core.Models;               // ModelDb, ModelId, RelicModel
@@ -78,6 +79,7 @@ internal sealed class SlotMachineState
     private int _jackpotIdx = -1;
     private readonly System.Random _rng = new();
     private NMerchantInventory? _shop;
+    private Player? _player;         // to check whether the (1-time) jackpot relic is already owned
     private List<SlotSymbol> _fillers = new();
     private SlotSymbol? _bomb;
     private SlotSymbol? _jackpot;   // SignetRing — the Ancient relic that self-grants 999 gold on obtain
@@ -88,9 +90,9 @@ internal sealed class SlotMachineState
     /// <summary>A random symbol for the whizzing (non-result) reel cells during a spin animation.</summary>
     internal int RollOne() => Symbols.Count > 0 ? _rng.Next(Symbols.Count) : 0;
 
-    internal static SlotMachineState Build(NMerchantInventory? shop)
+    internal static SlotMachineState Build(NMerchantInventory? shop, Player? player = null)
     {
-        var st = new SlotMachineState { _shop = shop };
+        var st = new SlotMachineState { _shop = shop, _player = player };
         st._bomb = new SlotSymbol { Id = "BOMB", IsBomb = true, Icon = SlotArt.LoadPng("slot_bomb.png") };
         // Jackpot symbol = SignetRing (Ancient relic that self-grants 999 gold on obtain). Its own icon is
         // the reel symbol, so hitting it on the payline literally wins "the 999 relic".
@@ -174,8 +176,10 @@ internal sealed class SlotMachineState
 
         foreach (var f in _fillers) { _fillerIdx.Add(Symbols.Count); Symbols.Add(f); }
         if (_bomb != null) { _bombIdx = Symbols.Count; Symbols.Add(_bomb); }
+        // Jackpot relic is ONE-TIME: once the player owns it, drop the symbol entirely (a Refresh after the
+        // win re-runs this, so the jackpot stops appearing on the reels).
         _jackpotIdx = -1;
-        if (_jackpot != null) { _jackpotIdx = Symbols.Count; Symbols.Add(_jackpot); }
+        if (_jackpot != null && !PlayerOwnsJackpot()) { _jackpotIdx = Symbols.Count; Symbols.Add(_jackpot); }
 
         // Weighted bag for manual free-spin reels: fillers common, shop relics medium, bomb & jackpot rare —
         // so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
@@ -184,6 +188,14 @@ internal sealed class SlotMachineState
         foreach (var f in _fillerIdx) for (int k = 0; k < 4; k++) _stripPool.Add(f);   // filler weight 4
         if (_bombIdx >= 0) _stripPool.Add(_bombIdx);                                    // bomb weight 1
         if (_jackpotIdx >= 0) _stripPool.Add(_jackpotIdx);                              // jackpot weight 1 (rare)
+    }
+
+    /// <summary>True once the player already owns the jackpot relic (SignetRing) — then it's retired.</summary>
+    private bool PlayerOwnsJackpot()
+    {
+        if (_jackpot?.Relic == null || _player == null) return false;
+        try { return _player.Relics.Any(r => r != null && r.Id.Entry == _jackpot.Id); }
+        catch { return false; }
     }
 
     /// <summary>A weighted symbol for a MANUAL free-spinning reel strip (bomb is rare here).</summary>
