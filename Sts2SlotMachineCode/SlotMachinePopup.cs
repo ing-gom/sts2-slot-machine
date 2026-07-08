@@ -27,7 +27,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     // the lever overlays its mount. All multiplied by the display scale _f.
     // window/lever geometry is shared with the resting cabinet — see SlotWindow.
 
-    private const int BetAmount = 10;   // fixed 10 gold per spin (not adjustable)
+    private const int BetAmount = 30;   // fixed 30 gold per spin (not adjustable)
 
     // lever drag-to-pull (click also works)
     private static readonly float LeverMaxRot = Mathf.DegToRad(90f);
@@ -130,7 +130,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         bar.Alignment = BoxContainer.AlignmentMode.Center;
 
         // bet & gold use the shop's OWN price widget (coin + game font), cloned; fallback to a coin icon.
-        // "Bet [coin]10"  (fixed 10 gold per spin)
+        // "Bet [coin]30"  (fixed 30 gold per spin)
         bar.AddChild(MakeLabel(SlotLoc.Ui("BET"), 20, HorizontalAlignment.Center));
         Control? betCost = CloneCostWidget($"{BetAmount}");
         if (betCost != null) bar.AddChild(betCost);
