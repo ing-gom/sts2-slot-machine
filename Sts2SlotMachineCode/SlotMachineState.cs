@@ -17,6 +17,7 @@ internal sealed class SlotSymbol
     internal string Id = "";
     internal bool IsShop;
     internal bool IsBomb;
+    internal bool IsJackpot;                 // the special jackpot relic (SignetRing); granted via RelicCmd.Obtain
     internal MerchantRelicEntry? ShopEntry;  // used to grant a shop relic for free
     internal Texture2D? Icon;
 }
@@ -59,22 +60,27 @@ internal sealed class SlotMachineState
     private const int PLine3 = 16;   // 1.6%  → 3-line gold
     private const int PFull  = 2;    // 0.2%  → full grid gold
     private const int PBomb  = 10;   // 1.0%  → all rewards void (RTP unchanged: freed % just becomes a plain miss)
+    private const int PJackpot = 2;  // 0.2%  → jackpot relic (SignetRing, self-pays 999g) — kept rare so RTP stays sane
 
     internal double PctRelic => _shopIdx.Count > 0 ? PRelic / 10.0 : 0.0;
     internal double PctLine(int n) => (n == 1 ? PLine1 : n == 2 ? PLine2 : n == 3 ? PLine3 : 0) / 10.0;
     internal double PctFull => PFull / 10.0;
     internal double PctBomb => PBomb / 10.0;
-    internal double PctLose => (1000 - (_shopIdx.Count > 0 ? PRelic : 0) - PLine1 - PLine2 - PLine3 - PFull - PBomb) / 10.0;
+    internal double PctJackpot => _jackpotIdx >= 0 ? PJackpot / 10.0 : 0.0;
+    internal double PctLose => (1000 - (_shopIdx.Count > 0 ? PRelic : 0) - PLine1 - PLine2 - PLine3 - PFull - PBomb
+                               - (_jackpotIdx >= 0 ? PJackpot : 0)) / 10.0;
 
     internal readonly List<SlotSymbol> Symbols = new();
     private readonly List<int> _shopIdx = new();
     private readonly List<int> _fillerIdx = new();
     private readonly List<int> _stripPool = new();   // weighted symbol bag for MANUAL free-spin reels (bomb rare)
     private int _bombIdx = -1;
+    private int _jackpotIdx = -1;
     private readonly System.Random _rng = new();
     private NMerchantInventory? _shop;
     private List<SlotSymbol> _fillers = new();
     private SlotSymbol? _bomb;
+    private SlotSymbol? _jackpot;   // SignetRing — the Ancient relic that self-grants 999 gold on obtain
 
     internal int Count => Symbols.Count;
     internal Texture2D? Icon(int i) => (i >= 0 && i < Symbols.Count) ? Symbols[i].Icon : null;
@@ -86,6 +92,16 @@ internal sealed class SlotMachineState
     {
         var st = new SlotMachineState { _shop = shop };
         st._bomb = new SlotSymbol { Id = "BOMB", IsBomb = true, Icon = SlotArt.LoadPng("slot_bomb.png") };
+        // Jackpot symbol = SignetRing (Ancient relic that self-grants 999 gold on obtain). Its own icon is
+        // the reel symbol, so hitting it on the payline literally wins "the 999 relic".
+        try
+        {
+            var sig = ModelDb.GetByIdOrNull<RelicModel>(new ModelId("RELIC", StringHelper.Slugify("SignetRing")));
+            var ic = sig?.Icon;
+            if (sig != null && ic != null)
+                st._jackpot = new SlotSymbol { Relic = sig, Id = sig.Id.Entry, IsJackpot = true, Icon = ic };
+        }
+        catch (Exception e) { MainFile.Logger.Warn($"[{MainFile.ModId}] jackpot relic (SignetRing) load failed: {e.Message}"); }
         st.SampleFillers();
         st.Rebuild();
         return st;
@@ -104,6 +120,7 @@ internal sealed class SlotMachineState
             pool = ModelDb.AllRelics
                 .Where(r => r.Rarity != RelicRarity.Shop
                             && !shopIds.Contains(r.Id.Entry)
+                            && (_jackpot == null || r.Id.Entry != _jackpot.Id)             // never the jackpot relic
                             && (r.GetType().Namespace?.StartsWith("MegaCrit") ?? false))   // vanilla only
                 .ToList();
         }
@@ -157,13 +174,16 @@ internal sealed class SlotMachineState
 
         foreach (var f in _fillers) { _fillerIdx.Add(Symbols.Count); Symbols.Add(f); }
         if (_bomb != null) { _bombIdx = Symbols.Count; Symbols.Add(_bomb); }
+        _jackpotIdx = -1;
+        if (_jackpot != null) { _jackpotIdx = Symbols.Count; Symbols.Add(_jackpot); }
 
-        // Weighted bag for manual free-spin reels: fillers common, shop relics medium, bomb rare — so a
-        // manually-stopped bomb (only the payline voids) lands seldom and a relic triple is hard to hit.
+        // Weighted bag for manual free-spin reels: fillers common, shop relics medium, bomb & jackpot rare —
+        // so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
         _stripPool.Clear();
         foreach (var s in _shopIdx)   for (int k = 0; k < 3; k++) _stripPool.Add(s);   // shop relic weight 3
         foreach (var f in _fillerIdx) for (int k = 0; k < 4; k++) _stripPool.Add(f);   // filler weight 4
         if (_bombIdx >= 0) _stripPool.Add(_bombIdx);                                    // bomb weight 1
+        if (_jackpotIdx >= 0) _stripPool.Add(_jackpotIdx);                              // jackpot weight 1 (rare)
     }
 
     /// <summary>A weighted symbol for a MANUAL free-spinning reel strip (bomb is rare here).</summary>
@@ -185,7 +205,12 @@ internal sealed class SlotMachineState
         }
 
         int mid = g[0, 1];
-        if (mid == g[1, 1] && mid == g[2, 1] && mid >= 0 && mid < Symbols.Count && Symbols[mid].IsShop)
+        bool midTriple = mid == g[1, 1] && mid == g[2, 1] && mid >= 0 && mid < Symbols.Count;
+        if (midTriple && _jackpotIdx >= 0 && mid == _jackpotIdx)
+        {
+            res.Grants.Add(Symbols[_jackpotIdx]); res.Bingos = 1; res.Gold = 0; return res;   // JACKPOT relic
+        }
+        if (midTriple && Symbols[mid].IsShop)
         {
             res.Grants.Add(Symbols[mid]); res.Bingos = 1; res.Gold = 0; return res;   // middle shop triple → relic
         }
@@ -222,6 +247,7 @@ internal sealed class SlotMachineState
                 case "3": BuildLines(res, 3); break;
                 case "full": BuildFull(res); break;
                 case "bomb": BuildBomb(res); break;
+                case "jackpot": if (_jackpotIdx >= 0) BuildJackpot(res); else BuildLose(res); break;
                 default: BuildLose(res); break;
             }
             return res;
@@ -235,6 +261,7 @@ internal sealed class SlotMachineState
         else if (r < (cum += PLine3)) BuildLines(res, 3);
         else if (r < (cum += PFull)) BuildFull(res);
         else if (r < (cum += PBomb)) BuildBomb(res);
+        else if (_jackpotIdx >= 0 && r < (cum += PJackpot)) BuildJackpot(res);
         else BuildLose(res);
         return res;
     }
@@ -364,5 +391,18 @@ internal sealed class SlotMachineState
         }
         res.Grants.Add(Symbols[shop]);
         res.Bingos = 1; res.Gold = 0;   // a relic win pays NO gold
+    }
+
+    private void BuildJackpot(SpinResult res)
+    {
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            FillLoseRow(res.Grid, 0);
+            FillLoseRow(res.Grid, 2);
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = _jackpotIdx;   // middle row = jackpot triple
+            if (CountBingos(res.Grid) == 1) break;
+        }
+        res.Grants.Add(Symbols[_jackpotIdx]);   // SignetRing — self-grants 999 gold on obtain
+        res.Bingos = 1; res.Gold = 0;
     }
 }

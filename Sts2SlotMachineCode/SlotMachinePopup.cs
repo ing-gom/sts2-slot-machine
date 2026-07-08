@@ -288,12 +288,14 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         bool manual = SlotOptions.ManualStop && !SlotOptions.SkipSpin;
 
         SlotSymbol? bomb = null;
+        SlotSymbol? jackpot = null;
         var shopIcons = new HBoxContainer();
         shopIcons.AddThemeConstantOverride("separation", 8);
         int shopCount = 0;
         foreach (var sym in _state.Symbols)
         {
             if (sym.IsBomb) { bomb = sym; continue; }
+            if (sym.IsJackpot) { jackpot = sym; continue; }
             if (sym.IsShop) { shopIcons.AddChild(RelicIcon(sym.Icon, 46f)); shopCount++; }
         }
         if (shopCount > 0)
@@ -302,6 +304,18 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                 manual ? SlotLoc.Ui("RELIC_ROW") : $"{SlotLoc.Ui("RELIC_ROW")}  ({FmtPct(_state.PctRelic)}%)",
                 20, HorizontalAlignment.Left));
             _paytableHost.AddChild(shopIcons);
+        }
+
+        // jackpot relic (SignetRing) — its own icon + the 999-relic prize
+        if (jackpot != null)
+        {
+            var jr = new HBoxContainer();
+            jr.AddThemeConstantOverride("separation", 8);
+            jr.AddChild(RelicIcon(jackpot.Icon, 46f));
+            jr.AddChild(MakeLabel(
+                manual ? SlotLoc.Ui("JACKPOT_ROW") : $"{SlotLoc.Ui("JACKPOT_ROW")}  ({FmtPct(_state.PctJackpot)}%)",
+                20, HorizontalAlignment.Left));
+            _paytableHost.AddChild(jr);
         }
 
         // gold — by number of bingo lines; auto mode shows each line's probability, manual shows amounts only
@@ -597,9 +611,9 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         }
         else
         {
-            // grant any shop relics won — hide our popup first so the relic's follow-up screen (card
+            // grant any relics won — hide our popup first so the relic's follow-up screen (card
             // pick / enchant / etc.) draws in FRONT, and don't swallow its keyboard input.
-            if (roll.Grants.Count > 0 && _shop != null)
+            if (roll.Grants.Count > 0)
             {
                 if (!SlotOptions.SkipCelebration)
                 {
@@ -610,12 +624,17 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
 
                 SetContentVisible(false);
                 foreach (var g in roll.Grants)
-                    if (g.ShopEntry != null)
+                {
+                    try
                     {
-                        try { await g.ShopEntry.OnTryPurchaseWrapper(_shop.Inventory, ignoreCost: true); }
-                        catch (Exception ge) { MainFile.Logger.Warn($"[{MainFile.ModId}] grant failed: {ge.Message}"); }
-                        if (!Alive()) return;
+                        if (g.ShopEntry != null && _shop != null)
+                            await g.ShopEntry.OnTryPurchaseWrapper(_shop.Inventory, ignoreCost: true);   // shop relic (free)
+                        else if (g.Relic != null)
+                            await RelicCmd.Obtain(g.Relic.ToMutable(), _player);                          // jackpot relic (SignetRing → self-pays 999g)
                     }
+                    catch (Exception ge) { MainFile.Logger.Warn($"[{MainFile.ModId}] grant failed: {ge.Message}"); }
+                    if (!Alive()) return;
+                }
                 SetContentVisible(true);
                 _state.Refresh();
                 RebuildPaytable();
@@ -624,7 +643,8 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             // A relic win pays NO gold — the relic is the reward.
             if (roll.Grants.Count > 0)
             {
-                SetResult(SlotLoc.Ui("RELIC_WON"), Colors.Gold);
+                bool jackpot = roll.Grants.Exists(g => g.IsJackpot);
+                SetResult(SlotLoc.Ui(jackpot ? "JACKPOT_WON" : "RELIC_WON"), Colors.Gold);
             }
             else if (roll.Gold > 0)
             {
