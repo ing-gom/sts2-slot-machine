@@ -24,7 +24,7 @@ public class MainFile
     public static void Initialize() =>
         ModBootstrap.Run(ModId, Logger, typeof(MainFile).Assembly, body: () =>
         {
-            Logger.Info($"[{ModId}] shop slot machine active (30 gold per spin).");
+            Logger.Info($"[{ModId}] shop slot machine active (20 gold per spin).");
             if (Engine.GetMainLoop() is not SceneTree tree) return;
             // Defer so ModConfig has finished its own Initialize before we Register().
             tree.CreateTimer(0.0).Timeout += RegisterConfig;
