@@ -44,12 +44,14 @@ internal sealed class SlotMachineState
 {
     private const int FillerCount = 6;
 
-    // Gold by NUMBER of bingo lines (index = line count; 8 = full 3×3). Only 1/2/3/8 actually occur. TUNE HERE.
-    private static readonly int[] BingoGold = { 0, 20, 50, 150, 300, 500, 700, 850, 999 };
+    // Gold by NUMBER of bingo lines (index = line count; 8 = full 3×3). Only 1/2/3/8 occur in AUTO mode
+    // (manual mode can hit 4-7). MUST stay monotonically increasing. TUNE HERE.
+    // 2.5× the original 20/50/150/…/999 curve, to match the 30-gold bet (was 10).
+    private static readonly int[] BingoGold = { 0, 50, 125, 375, 750, 1250, 1750, 2125, 2499 };
     internal int GoldForBingos(int n) => n <= 0 ? 0 : BingoGold[Math.Min(n, BingoGold.Length - 1)];
 
     // Outcome probabilities in PER-MILLE (‰). Lose = whatever is left. TUNE HERE.
-    // Tuned for EV ≈ 9.5 gold per 10 bet (RTP ~95%) with the 20/50/150/999 payouts: gentle slow loss.
+    // With the 2.5× payouts and a 30-gold bet: gold EV ≈ 23.7 → RTP ≈ 79% (plus the 5% free-relic prize).
     private const int PRelic = 50;   // 5.0%  → win a shop relic (middle row)
     private const int PLine1 = 145;  // 14.5% → 1-line gold
     private const int PLine2 = 44;   // 4.4%  → 2-line gold
