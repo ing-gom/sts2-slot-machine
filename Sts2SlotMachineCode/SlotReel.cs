@@ -18,6 +18,11 @@ internal sealed partial class SlotReel : Control
     private Control _strip = null!;
     private Tween? _tween;
 
+    // --- manual free-spin state ---
+    private bool _free;
+    private float _freeSpeed;                              // px / sec
+    private readonly int[] _freeSeq = new int[VisibleRows + 1];   // symbols currently on the looping strip
+
     public override void _Ready()
     {
         float wh = CellH * VisibleRows;
@@ -57,6 +62,45 @@ internal sealed partial class SlotReel : Control
               .SetTrans(Tween.TransitionType.Cubic).SetEase(Tween.EaseType.Out);
     }
 
+    /// <summary>Begin free-spinning (manual mode) — the strip loops until <see cref="StopHere"/> is called.</summary>
+    internal void StartFreeSpin(float cellsPerSec)
+    {
+        _tween?.Kill();
+        _freeSpeed = cellsPerSec * CellH;
+        for (int i = 0; i < _freeSeq.Length; i++) _freeSeq[i] = State.RollForStrip();
+        BuildStrip(_freeSeq);
+        _strip.Position = new Vector2(0, 0);
+        _free = true;
+    }
+
+    /// <summary>Stop a free-spinning reel where it is — snap to the nearest cell and return the landed
+    /// column (top / middle / bottom). The symbols under the window ARE the result.</summary>
+    internal int[] StopHere()
+    {
+        _free = false;
+        // strip position rides in (-CellH, 0]; round to decide which 3 consecutive symbols are framed.
+        int[] landed = _strip.Position.Y > -CellH * 0.5f
+            ? new[] { _freeSeq[0], _freeSeq[1], _freeSeq[2] }
+            : new[] { _freeSeq[1], _freeSeq[2], _freeSeq[3] };
+        SetColumn(landed[0], landed[1], landed[2]);   // lock a clean static window
+        return landed;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (!_free) return;
+        var p = _strip.Position;
+        p.Y -= (float)(_freeSpeed * delta);
+        while (p.Y <= -CellH)                          // a cell scrolled off the top → recycle one symbol
+        {
+            p.Y += CellH;
+            for (int i = 0; i < _freeSeq.Length - 1; i++) _freeSeq[i] = _freeSeq[i + 1];
+            _freeSeq[^1] = State.RollForStrip();       // weighted (bomb rare) so manual odds stay sane
+            BuildStrip(_freeSeq);
+        }
+        _strip.Position = p;
+    }
+
     /// <summary>Show a column (top / middle / bottom) immediately, no animation (skip-spin option).</summary>
     internal void SetColumn(int top, int mid, int bot)
     {
@@ -85,7 +129,9 @@ internal sealed partial class SlotReel : Control
 
     private void BuildStrip(int[] seq)
     {
-        foreach (var c in _strip.GetChildren()) c.QueueFree();
+        // Free immediately (not QueueFree) so a per-frame rebuild during a free-spin never draws the old
+        // and new cells together for a frame (which would flicker/double the fast-scrolling symbols).
+        while (_strip.GetChildCount() > 0) { var c = _strip.GetChild(0); _strip.RemoveChild(c); c.Free(); }
 
         float lt = Mathf.Max(1.5f, CellH * 0.03f);
         var lineC = new Color(0.10f, 0.09f, 0.08f, 0.9f);

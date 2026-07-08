@@ -57,6 +57,12 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     private Label? _goldLabel;    // fallback if the shop widget can't be cloned
     private VBoxContainer _paytableHost = null!;
 
+    // --- manual-stop mode ---
+    private Button? _stopButton;
+    private int _manualIdx;
+    private readonly int[]?[] _manualLanded = new int[3][];
+    private TaskCompletionSource<bool>? _manualDone;
+
     public static void Toggle(Player player, NBackButton? backSource, NMerchantInventory? shop,
                               SlotMachineState state, MerchantSlotCabinet? cabinet = null)
     {
@@ -125,6 +131,14 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         _result = MakeLabel(" ", 26, HorizontalAlignment.Center);
         vbox.AddChild(_result);
 
+        // STOP button (manual mode only) — overlaid on the cabinet's lower panel so toggling it never
+        // reflows the layout; shown while the reels free-spin, each press stops the next reel.
+        _stopButton = BuildStopButton();
+        float sbw = 150f * _f, sbh = 46f * _f;
+        _stopButton.Size = new Vector2(sbw, sbh);
+        _stopButton.Position = new Vector2(mw / 2f - sbw / 2f, (SlotWindow.WinY0 + SlotWindow.Cell * 3f + 16f) * _f);
+        machine.AddChild(_stopButton);
+
         var bar = new HBoxContainer();
         bar.AddThemeConstantOverride("separation", 8);
         bar.Alignment = BoxContainer.AlignmentMode.Center;
@@ -165,6 +179,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     public override void _ExitTree()
     {
         _closed = true;
+        _manualDone?.TrySetResult(true);   // unblock a pending manual spin so its await can bail on !Alive()
         if (_player != null) _player.GoldChanged -= UpdateInfo;
         if (ReferenceEquals(_open, this)) _open = null;
     }
@@ -173,6 +188,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     {
         if (_closed) return;
         _closed = true;
+        _manualDone?.TrySetResult(true);   // unblock a pending manual spin (await returns, then !Alive() bails)
         QueueFree();
     }
 
@@ -267,6 +283,10 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
 
         _paytableHost.AddChild(MakeLabel(SlotLoc.Ui("PAYTABLE"), 26, HorizontalAlignment.Left));
 
+        // Manual mode: the odds are emergent (your timing decides), so the fixed percentages don't apply —
+        // show payout amounts only, plus a note.
+        bool manual = SlotOptions.ManualStop && !SlotOptions.SkipSpin;
+
         SlotSymbol? bomb = null;
         var shopIcons = new HBoxContainer();
         shopIcons.AddThemeConstantOverride("separation", 8);
@@ -278,27 +298,40 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         }
         if (shopCount > 0)
         {
-            _paytableHost.AddChild(MakeLabel($"{SlotLoc.Ui("RELIC_ROW")}  ({FmtPct(_state.PctRelic)}%)", 20, HorizontalAlignment.Left));
+            _paytableHost.AddChild(MakeLabel(
+                manual ? SlotLoc.Ui("RELIC_ROW") : $"{SlotLoc.Ui("RELIC_ROW")}  ({FmtPct(_state.PctRelic)}%)",
+                20, HorizontalAlignment.Left));
             _paytableHost.AddChild(shopIcons);
         }
 
-        // gold — by number of bingo lines; each row shows the probability
+        // gold — by number of bingo lines; auto mode shows each line's probability, manual shows amounts only
         _paytableHost.AddChild(MakeLabel(SlotLoc.Ui("BINGO_HEADER"), 22, HorizontalAlignment.Left));
         for (int n = 1; n <= 3; n++)
-            _paytableHost.AddChild(MakeLabel(string.Format(SlotLoc.Ui("BINGO_ROW"), n, _state.GoldForBingos(n), FmtPct(_state.PctLine(n))), 20, HorizontalAlignment.Left));
-        _paytableHost.AddChild(MakeLabel(string.Format(SlotLoc.Ui("BINGO_FULL"), _state.GoldForBingos(8), FmtPct(_state.PctFull)), 20, HorizontalAlignment.Left));
+            _paytableHost.AddChild(MakeLabel(manual
+                ? string.Format(SlotLoc.Ui("BINGO_ROW_NP"), n, _state.GoldForBingos(n))
+                : string.Format(SlotLoc.Ui("BINGO_ROW"), n, _state.GoldForBingos(n), FmtPct(_state.PctLine(n))),
+                20, HorizontalAlignment.Left));
+        _paytableHost.AddChild(MakeLabel(manual
+            ? string.Format(SlotLoc.Ui("BINGO_FULL_NP"), _state.GoldForBingos(8))
+            : string.Format(SlotLoc.Ui("BINGO_FULL"), _state.GoldForBingos(8), FmtPct(_state.PctFull)),
+            20, HorizontalAlignment.Left));
         _paytableHost.AddChild(MakeLabel(SlotLoc.Ui("BINGO_NOTE"), 18, HorizontalAlignment.Left));
 
-        // bomb + lose odds
+        // bomb + lose odds (percentages only meaningful in auto mode)
         if (bomb != null)
         {
             var br = new HBoxContainer();
             br.AddThemeConstantOverride("separation", 8);
             br.AddChild(RelicIcon(bomb.Icon, 46f));
-            br.AddChild(MakeLabel($"{SlotLoc.Ui("BOMB_LABEL")}  ({FmtPct(_state.PctBomb)}%)", 20, HorizontalAlignment.Left));
+            br.AddChild(MakeLabel(
+                manual ? SlotLoc.Ui("BOMB_LABEL") : $"{SlotLoc.Ui("BOMB_LABEL")}  ({FmtPct(_state.PctBomb)}%)",
+                20, HorizontalAlignment.Left));
             _paytableHost.AddChild(br);
         }
-        _paytableHost.AddChild(MakeLabel($"{SlotLoc.Ui("LOSE_LABEL")}  {FmtPct(_state.PctLose)}%", 18, HorizontalAlignment.Left));
+        if (manual)
+            _paytableHost.AddChild(MakeLabel(SlotLoc.Ui("SKILL_NOTE"), 18, HorizontalAlignment.Left));
+        else
+            _paytableHost.AddChild(MakeLabel($"{SlotLoc.Ui("LOSE_LABEL")}  {FmtPct(_state.PctLose)}%", 18, HorizontalAlignment.Left));
     }
 
     /// <summary>A relic icon fitted into a fixed box via explicit node Scale (robust at small sizes).</summary>
@@ -493,94 +526,39 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             await PlayerCmd.LoseGold(bet, _player, GoldLossType.Spent);
             if (!Alive()) return;
 
-            SpinResult roll = _state.Spin();
-            if (SlotOptions.SkipSpin)
+            SpinResult roll;
+            if (SlotOptions.ManualStop && !SlotOptions.SkipSpin)
             {
-                for (int c = 0; c < 3; c++)
-                    _reels[c].SetColumn(roll.Grid[c, 0], roll.Grid[c, 1], roll.Grid[c, 2]);   // snap to result
-            }
-            else
-            {
-                // Reel travel scales with how far the lever was pulled; each reel stops later than the last
-                // (0.6s stagger) so they settle left → centre → right.
-                float extra = Mathf.Max(0f, pull - 0.5f) / 0.5f;
-                int addSteps = (int)(extra * 40);
-                double addDur = extra * 1.4;
-                for (int c = 0; c < 3; c++)
-                    _reels[c].SpinToColumn(roll.Grid[c, 0], roll.Grid[c, 1], roll.Grid[c, 2],
-                                           12 + addSteps + c * 6, 0.8 + addDur + c * 0.6);
-                _cabinet?.MirrorSpin(roll);   // the small cabinet spins in sync
-
-                double wait = 0.8 + addDur + 2 * 0.6 + 0.25;   // outlast the last (right) reel
-                await ToSignal(tree.CreateTimer(wait), SceneTreeTimer.SignalName.Timeout);
+                roll = await RunManualSpin();       // reels free-spin; player stops each → landed grid IS the result
                 if (!Alive()) return;
             }
-
-            if (roll.Bomb)
-            {
-                if (!SlotOptions.SkipCelebration)
-                {
-                    // tease the reward the player ALMOST won — a quick fountain of it — then blow it away.
-                    if (roll.MissedRelic?.Icon != null)
-                        _shower?.Burst(12, ShowerOrigin(), ReelIconSize, roll.MissedRelic.Icon);
-                    else if (roll.MissedGold > 0)
-                        _shower?.Burst(Mathf.Clamp(roll.MissedGold / 10, 4, 40), ShowerOrigin(), ReelIconSize, _shopCoinTex);
-                    await ToSignal(tree.CreateTimer(0.55), SceneTreeTimer.SignalName.Timeout);
-                    if (!Alive()) return;
-                    Explode();   // scatters the just-spawned reward — snatched away
-                }
-                string bombMsg = roll.MissedRelic != null ? SlotLoc.Ui("BOMB_MISS_RELIC")
-                               : roll.MissedGold > 0 ? string.Format(SlotLoc.Ui("BOMB_MISS_GOLD"), roll.MissedGold)
-                               : SlotLoc.Ui("BOMB_BUST");
-                SetResult(bombMsg, StsColors.red);
-            }
             else
             {
-                // grant any shop relics won — hide our popup first so the relic's follow-up screen (card
-                // pick / enchant / etc.) draws in FRONT, and don't swallow its keyboard input.
-                if (roll.Grants.Count > 0 && _shop != null)
+                roll = _state.Spin();
+                if (SlotOptions.SkipSpin)
                 {
-                    // celebrate the relic with a fountain of its own icon, THEN hide our popup so the game's
-                    // relic-get / card / enchant screen draws in front.
-                    if (!SlotOptions.SkipCelebration)
-                    {
-                        _shower?.Burst(14, ShowerOrigin(), ReelIconSize, roll.Grants[0].Icon);
-                        await ToSignal(tree.CreateTimer(0.9), SceneTreeTimer.SignalName.Timeout);
-                        if (!Alive()) return;
-                    }
-
-                    SetContentVisible(false);
-                    foreach (var g in roll.Grants)
-                        if (g.ShopEntry != null)
-                        {
-                            try { await g.ShopEntry.OnTryPurchaseWrapper(_shop.Inventory, ignoreCost: true); }
-                            catch (Exception ge) { MainFile.Logger.Warn($"[{MainFile.ModId}] grant failed: {ge.Message}"); }
-                            if (!Alive()) return;
-                        }
-                    SetContentVisible(true);
-                    _state.Refresh();
-                    RebuildPaytable();
-                }
-
-                // A relic win pays NO gold — the relic is the reward.
-                if (roll.Grants.Count > 0)
-                {
-                    SetResult(SlotLoc.Ui("RELIC_WON"), Colors.Gold);
-                }
-                else if (roll.Gold > 0)
-                {
-                    if (!SlotOptions.SkipCelebration) ShowerCoins(roll.Gold);   // coins fountain out
-                    await PlayerCmd.GainGold(roll.Gold, _player);               // gold counts up
-                    if (!Alive()) return;
-                    SetResult(string.Format(SlotLoc.Ui("BINGO_GOLD"), roll.Bingos, roll.Gold), Colors.Gold);
+                    for (int c = 0; c < 3; c++)
+                        _reels[c].SetColumn(roll.Grid[c, 0], roll.Grid[c, 1], roll.Grid[c, 2]);   // snap to result
                 }
                 else
                 {
-                    SetResult(string.Format(SlotLoc.Ui("LOSE"), bet), StsColors.red);
+                    // Reel travel scales with how far the lever was pulled; each reel stops later than the last
+                    // (0.6s stagger) so they settle left → centre → right.
+                    float extra = Mathf.Max(0f, pull - 0.5f) / 0.5f;
+                    int addSteps = (int)(extra * 40);
+                    double addDur = extra * 1.4;
+                    for (int c = 0; c < 3; c++)
+                        _reels[c].SpinToColumn(roll.Grid[c, 0], roll.Grid[c, 1], roll.Grid[c, 2],
+                                               12 + addSteps + c * 6, 0.8 + addDur + c * 0.6);
+                    _cabinet?.MirrorSpin(roll);   // the small cabinet spins in sync
+
+                    double wait = 0.8 + addDur + 2 * 0.6 + 0.25;   // outlast the last (right) reel
+                    await ToSignal(tree.CreateTimer(wait), SceneTreeTimer.SignalName.Timeout);
+                    if (!Alive()) return;
                 }
             }
 
-            MainFile.Logger.Info($"[{MainFile.ModId}] spin bingos={roll.Bingos} gold={roll.Gold} grants={roll.Grants.Count} bomb={roll.Bomb}.");
+            await ResolvePayout(roll, bet);
         }
         catch (Exception e)
         {
@@ -591,6 +569,138 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             _busy = false;
             if (Alive()) UpdateInfo();
         }
+    }
+
+    /// <summary>Apply a spin's outcome — bomb bust / relic grant / gold — with the celebration effects.
+    /// Shared by the automatic and manual paths (the grid it scores is built differently, the payout isn't).</summary>
+    private async Task ResolvePayout(SpinResult roll, int bet)
+    {
+        SceneTree tree = GetTree();
+
+        if (roll.Bomb)
+        {
+            if (!SlotOptions.SkipCelebration)
+            {
+                // tease the reward the player ALMOST won — a quick fountain of it — then blow it away.
+                if (roll.MissedRelic?.Icon != null)
+                    _shower?.Burst(12, ShowerOrigin(), ReelIconSize, roll.MissedRelic.Icon);
+                else if (roll.MissedGold > 0)
+                    _shower?.Burst(Mathf.Clamp(roll.MissedGold / 10, 4, 40), ShowerOrigin(), ReelIconSize, _shopCoinTex);
+                await ToSignal(tree.CreateTimer(0.55), SceneTreeTimer.SignalName.Timeout);
+                if (!Alive()) return;
+                Explode();   // scatters the just-spawned reward — snatched away
+            }
+            string bombMsg = roll.MissedRelic != null ? SlotLoc.Ui("BOMB_MISS_RELIC")
+                           : roll.MissedGold > 0 ? string.Format(SlotLoc.Ui("BOMB_MISS_GOLD"), roll.MissedGold)
+                           : SlotLoc.Ui("BOMB_BUST");
+            SetResult(bombMsg, StsColors.red);
+        }
+        else
+        {
+            // grant any shop relics won — hide our popup first so the relic's follow-up screen (card
+            // pick / enchant / etc.) draws in FRONT, and don't swallow its keyboard input.
+            if (roll.Grants.Count > 0 && _shop != null)
+            {
+                if (!SlotOptions.SkipCelebration)
+                {
+                    _shower?.Burst(14, ShowerOrigin(), ReelIconSize, roll.Grants[0].Icon);
+                    await ToSignal(tree.CreateTimer(0.9), SceneTreeTimer.SignalName.Timeout);
+                    if (!Alive()) return;
+                }
+
+                SetContentVisible(false);
+                foreach (var g in roll.Grants)
+                    if (g.ShopEntry != null)
+                    {
+                        try { await g.ShopEntry.OnTryPurchaseWrapper(_shop.Inventory, ignoreCost: true); }
+                        catch (Exception ge) { MainFile.Logger.Warn($"[{MainFile.ModId}] grant failed: {ge.Message}"); }
+                        if (!Alive()) return;
+                    }
+                SetContentVisible(true);
+                _state.Refresh();
+                RebuildPaytable();
+            }
+
+            // A relic win pays NO gold — the relic is the reward.
+            if (roll.Grants.Count > 0)
+            {
+                SetResult(SlotLoc.Ui("RELIC_WON"), Colors.Gold);
+            }
+            else if (roll.Gold > 0)
+            {
+                if (!SlotOptions.SkipCelebration) ShowerCoins(roll.Gold);   // coins fountain out
+                await PlayerCmd.GainGold(roll.Gold, _player);               // gold counts up
+                if (!Alive()) return;
+                SetResult(string.Format(SlotLoc.Ui("BINGO_GOLD"), roll.Bingos, roll.Gold), Colors.Gold);
+            }
+            else
+            {
+                SetResult(string.Format(SlotLoc.Ui("LOSE"), bet), StsColors.red);
+            }
+        }
+
+        MainFile.Logger.Info($"[{MainFile.ModId}] spin bingos={roll.Bingos} gold={roll.Gold} grants={roll.Grants.Count} bomb={roll.Bomb}.");
+    }
+
+    /// <summary>Manual mode: start all three reels free-spinning, then wait while the player stops each one
+    /// with the STOP button. The landed 3×3 grid IS the result (scored by <see cref="SlotMachineState.ScoreManualGrid"/>).</summary>
+    private async Task<SpinResult> RunManualSpin()
+    {
+        _manualIdx = 0;
+        _manualLanded[0] = _manualLanded[1] = _manualLanded[2] = null;
+        _manualDone = new TaskCompletionSource<bool>();
+
+        for (int c = 0; c < 3; c++) _reels[c].StartFreeSpin(12f);
+        SetResult(SlotLoc.Ui("MANUAL_HINT"), StsColors.cream);
+        if (_stopButton != null) _stopButton.Visible = true;
+
+        await _manualDone.Task;   // completes when the 3rd reel is stopped (Close() also unblocks it)
+
+        var g = new int[3, 3];
+        for (int c = 0; c < 3; c++)
+        {
+            int[] col = _manualLanded[c] is { Length: 3 } l ? l : new[] { 0, 0, 0 };
+            g[c, 0] = col[0]; g[c, 1] = col[1]; g[c, 2] = col[2];
+        }
+        return _state.ScoreManualGrid(g);
+    }
+
+    /// <summary>STOP pressed — stop the next still-spinning reel (left → centre → right).</summary>
+    private void OnStopPressed()
+    {
+        if (_manualIdx >= 3 || _manualDone == null) return;
+        int c = _manualIdx++;
+        _manualLanded[c] = _reels[c].StopHere();
+        if (_manualIdx >= 3)
+        {
+            if (_stopButton != null) _stopButton.Visible = false;
+            _manualDone.TrySetResult(true);
+        }
+    }
+
+    /// <summary>A themed STOP button (game-locale font) for manual mode; hidden until the reels are spinning.</summary>
+    private Button BuildStopButton()
+    {
+        var b = new Button { Text = SlotLoc.Ui("STOP"), Visible = false, FocusMode = Control.FocusModeEnum.None };
+        b.AddThemeFontSizeOverride("font_size", (int)(24 * _f));
+        b.AddThemeColorOverride("font_color", StsColors.cream);
+        try { b.ApplyLocaleFontSubstitution(FontType.Regular, "font"); } catch { /* Latin locales keep the theme font */ }
+        foreach (var st in new[] { "normal", "hover", "pressed" })
+        {
+            var col = st == "pressed" ? new Color(0.55f, 0.10f, 0.08f)
+                    : st == "hover" ? new Color(0.90f, 0.24f, 0.18f)
+                                    : new Color(0.78f, 0.16f, 0.12f);
+            b.AddThemeStyleboxOverride(st, new StyleBoxFlat
+            {
+                BgColor = col,
+                CornerRadiusTopLeft = 8, CornerRadiusTopRight = 8, CornerRadiusBottomLeft = 8, CornerRadiusBottomRight = 8,
+                BorderWidthTop = 2, BorderWidthBottom = 2, BorderWidthLeft = 2, BorderWidthRight = 2,
+                BorderColor = new Color(0f, 0f, 0f, 0.5f),
+                ContentMarginLeft = 20, ContentMarginRight = 20, ContentMarginTop = 6, ContentMarginBottom = 6,
+            });
+        }
+        b.Pressed += OnStopPressed;
+        return b;
     }
 
     /// <summary>True while this popup is still a live node — guards every await against a mid-spin close.</summary>

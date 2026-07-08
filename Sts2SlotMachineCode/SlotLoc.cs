@@ -34,6 +34,11 @@ internal static class SlotLoc
         ["UI.BINGO_ROW"]       = ("{0} lines  {1}g  ({2}%)", "{0}줄  {1}골드  ({2}%)", "{0}线  {1}金币  ({2}%)"),
         ["UI.BINGO_FULL"]      = ("Full  {0}g  ({1}%)", "가득  {0}골드  ({1}%)", "全满  {0}金币  ({1}%)"),
         ["UI.BINGO_NOTE"]      = ("Row·Col·Diagonal ×3 = bingo", "가로·세로·대각선 3개 = 빙고", "横·竖·斜×3 = 连线"),
+        ["UI.STOP"]            = ("STOP", "정지", "停止"),
+        ["UI.MANUAL_HINT"]     = ("Stop the reels!", "릴을 멈추세요!", "停下转轮！"),
+        ["UI.SKILL_NOTE"]      = ("Manual: your timing decides", "수동: 멈추는 타이밍이 결정", "手动：由你的时机决定"),
+        ["UI.BINGO_ROW_NP"]    = ("{0} lines  {1}g", "{0}줄  {1}골드", "{0}线  {1}金币"),
+        ["UI.BINGO_FULL_NP"]   = ("Full  {0}g", "가득  {0}골드", "全满  {0}金币"),
         ["UI.BOMB_LABEL"]      = ("All rewards lost", "모든 보상 소멸", "所有奖励消失"),
         ["UI.LOSE_LABEL"]      = ("Miss", "꽝", "未中"),
     };

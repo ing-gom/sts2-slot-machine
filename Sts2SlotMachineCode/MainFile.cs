@@ -16,6 +16,7 @@ public class MainFile
     public const string ModId = "Sts2SlotMachine";
     private const string EntryKeySkipFx = "skipCelebration";
     private const string EntryKeySkipSpin = "skipSpin";
+    private const string EntryKeyManual = "manualStop";
 
     public static readonly MegaCrit.Sts2.Core.Logging.Logger Logger
         = ModBootstrap.CreateLogger(ModId);
@@ -39,10 +40,14 @@ public class MainFile
             .Toggle(EntryKeySkipSpin, "릴 회전 애니 스킵", defaultValue: false,
                 onChanged: v => SlotOptions.SkipSpin = v)
                 .Description("릴이 도는 애니메이션 없이 결과가 즉시 표시됩니다.")
+            .Toggle(EntryKeyManual, "수동 정지 (릴을 직접 멈춤)", defaultValue: false,
+                onChanged: v => SlotOptions.ManualStop = v)
+                .Description("릴이 계속 돌고, STOP 버튼으로 릴을 하나씩 직접 멈춥니다. 멈춘 자리가 곧 결과 — 확률표가 아니라 타이밍이 결정합니다. (‘릴 회전 애니 스킵’이 켜져 있으면 무시)")
             .Register();
 
         SlotOptions.SkipCelebration = ModConfigBridge.GetValue<bool>(ModId, EntryKeySkipFx, false);
         SlotOptions.SkipSpin = ModConfigBridge.GetValue<bool>(ModId, EntryKeySkipSpin, false);
-        Logger.Info($"[{ModId}] options: skipFx={SlotOptions.SkipCelebration}, skipSpin={SlotOptions.SkipSpin}.");
+        SlotOptions.ManualStop = ModConfigBridge.GetValue<bool>(ModId, EntryKeyManual, false);
+        Logger.Info($"[{ModId}] options: skipFx={SlotOptions.SkipCelebration}, skipSpin={SlotOptions.SkipSpin}, manual={SlotOptions.ManualStop}.");
     }
 }

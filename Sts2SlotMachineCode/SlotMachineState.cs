@@ -66,6 +66,7 @@ internal sealed class SlotMachineState
     internal readonly List<SlotSymbol> Symbols = new();
     private readonly List<int> _shopIdx = new();
     private readonly List<int> _fillerIdx = new();
+    private readonly List<int> _stripPool = new();   // weighted symbol bag for MANUAL free-spin reels (bomb rare)
     private int _bombIdx = -1;
     private readonly System.Random _rng = new();
     private NMerchantInventory? _shop;
@@ -153,6 +154,48 @@ internal sealed class SlotMachineState
 
         foreach (var f in _fillers) { _fillerIdx.Add(Symbols.Count); Symbols.Add(f); }
         if (_bomb != null) { _bombIdx = Symbols.Count; Symbols.Add(_bomb); }
+
+        // Weighted bag for manual free-spin reels: fillers common, shop relics medium, bomb rare — so a
+        // manually-stopped bomb (only the payline voids) lands seldom and a relic triple is hard to hit.
+        _stripPool.Clear();
+        foreach (var s in _shopIdx)   for (int k = 0; k < 3; k++) _stripPool.Add(s);   // shop relic weight 3
+        foreach (var f in _fillerIdx) for (int k = 0; k < 4; k++) _stripPool.Add(f);   // filler weight 4
+        if (_bombIdx >= 0) _stripPool.Add(_bombIdx);                                    // bomb weight 1
+    }
+
+    /// <summary>A weighted symbol for a MANUAL free-spinning reel strip (bomb is rare here).</summary>
+    internal int RollForStrip() => _stripPool.Count > 0 ? _stripPool[_rng.Next(_stripPool.Count)] : RollOne();
+
+    /// <summary>
+    /// Score an ACTUAL 3×3 grid the player stopped on (manual mode) — the outcome is whatever they landed,
+    /// not a predetermined roll. Bomb voids only when it sits on the middle payline; a middle-row shop
+    /// triple wins that relic; otherwise gold by bingo-line count (a line of bombs never counts).
+    /// </summary>
+    internal SpinResult ScoreManualGrid(int[,] g)
+    {
+        var res = new SpinResult();
+        for (int c = 0; c < 3; c++) for (int r = 0; r < 3; r++) res.Grid[c, r] = g[c, r];
+
+        if (g[0, 1] == _bombIdx || g[1, 1] == _bombIdx || g[2, 1] == _bombIdx)
+        {
+            res.Bomb = true; res.Gold = 0; res.Bingos = 0; return res;   // bomb on the payline → bust
+        }
+
+        int mid = g[0, 1];
+        if (mid == g[1, 1] && mid == g[2, 1] && mid >= 0 && mid < Symbols.Count && Symbols[mid].IsShop)
+        {
+            res.Grants.Add(Symbols[mid]); res.Bingos = 1; res.Gold = 0; return res;   // middle shop triple → relic
+        }
+
+        int n = 0;
+        foreach (var (cx, cy) in Lines())
+        {
+            int v = g[cx[0], cy[0]];
+            if (v == _bombIdx) continue;                                              // a bomb line pays nothing
+            if (v == g[cx[1], cy[1]] && v == g[cx[2], cy[2]]) n++;
+        }
+        res.Bingos = n; res.Gold = GoldForBingos(n);
+        return res;
     }
 
     // ---- the spin: draw an outcome, then build a matching grid ----
