@@ -17,7 +17,8 @@ namespace Sts2SlotMachine;
 /// real relic-icon reels, static) that spawns at one of ten spots around the merchant screen. It is a
 /// plain <see cref="Control"/> parented INTO the merchant room, so it shares the room's draw depth — the
 /// map, settings, pause and other overlays correctly render on top of it (a floating CanvasLayer used to
-/// draw over everything). Clicking it opens <see cref="SlotMachinePopup"/>. Single-player only.
+/// draw over everything). Clicking it opens <see cref="SlotMachinePopup"/>. In co-op each client gets its
+/// own cabinet (see MULTIPLAYER_SLOT.md).
 /// </summary>
 internal sealed partial class MerchantSlotCabinet : Control
 {
@@ -59,6 +60,10 @@ internal sealed partial class MerchantSlotCabinet : Control
                   ?? RunManager.Instance.State?.Players.FirstOrDefault();
 
         _state = SlotMachineState.Build(_room.Inventory, _player);   // symbol pool: shop relics + value relics (shared with the popup)
+
+        // co-op: tell the partner which relics OUR shop stocks, so their reels can win from our stock too
+        // (union pool). Their reciprocal broadcast fills our reels via SlotNet.PeerShopRelicIds.
+        if (_player != null) SlotNet.BroadcastShopRelics(_player, _state.OwnShopRelicIds());
 
         Texture2D? cabTex = LoadPng("slot_machine_cabinet.png");
         if (cabTex == null)
@@ -204,7 +209,10 @@ internal sealed partial class MerchantSlotCabinet : Control
     }
 }
 
-/// <summary>Places the slot cabinet on every merchant room, at a random spot (single-player only).</summary>
+/// <summary>Places the slot cabinet on every merchant room, at a random spot. Co-op: each client gets
+/// its own cabinet fed by its own per-player shop; payouts replicate via <see cref="SlotNet"/> and the
+/// linked-machine interactions (union reel pool, shop deplete, shared pool) ride the synced action
+/// queue — see MULTIPLAYER_SLOT.md.</summary>
 [HarmonyPatch(typeof(NMerchantRoom), nameof(NMerchantRoom._Ready))]
 internal static class MerchantSlotCabinetPatch
 {
@@ -212,9 +220,6 @@ internal static class MerchantSlotCabinetPatch
     {
         try
         {
-            // The reel result is rolled locally, so a co-op client would desync — gate to solo.
-            int players = RunManager.Instance?.State?.Players?.Count() ?? 1;
-            if (players > 1) return;
             MerchantSlotCabinet.Attach(__instance);
         }
         catch (Exception e)

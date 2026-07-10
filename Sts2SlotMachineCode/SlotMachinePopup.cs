@@ -55,6 +55,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     private Label _result = null!;
     private Control? _goldCost;   // cloned shop price widget (coin + game-font label)
     private Label? _goldLabel;    // fallback if the shop widget can't be cloned
+    private Label? _poolValueLabel;   // shared co-op pool total (updates on SlotNet.PoolChanged)
     private VBoxContainer _paytableHost = null!;
 
     // --- manual-stop mode ---
@@ -119,6 +120,9 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             MouseFilter = Control.MouseFilterEnum.Ignore,
         });
 
+        // pick up the latest co-op peer shop list (union reel pool) before laying out the reels
+        _state.Refresh();
+
         // reels + dividers + payline (shared with the resting cabinet); horizontal lines scroll in-reel
         _reels = SlotWindow.Build(machine, _f, _state);
 
@@ -159,6 +163,16 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         else { bar.AddChild(CoinIcon()); _goldLabel = MakeLabel($"{_player.Gold}", 20, HorizontalAlignment.Left); bar.AddChild(_goldLabel); }
         vbox.AddChild(bar);
 
+        // shared pool meter — both players watch the same pot climb; won whole on a pool-hit spin.
+        var poolRow = new HBoxContainer();
+        poolRow.AddThemeConstantOverride("separation", 8);
+        poolRow.Alignment = BoxContainer.AlignmentMode.Center;
+        poolRow.AddChild(MakeLabel(SlotLoc.Ui("POOL_LABEL"), 20, HorizontalAlignment.Center));
+        poolRow.AddChild(CoinIcon());
+        _poolValueLabel = MakeLabel($"{SlotNet.SharedPool}", 20, HorizontalAlignment.Left);
+        poolRow.AddChild(_poolValueLabel);
+        vbox.AddChild(poolRow);
+
         // paytable legend on the LEFT (no background): each symbol → its reward (rebuilt after a relic win)
         _paytableHost = new VBoxContainer();
         _paytableHost.AddThemeConstantOverride("separation", 8);
@@ -173,7 +187,11 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         AddChild(_shower);   // last child → coins draw on top of the machine
 
         _player.GoldChanged += UpdateInfo;
+        SlotNet.PoolChanged += UpdatePool;
         UpdateInfo();
+
+        // co-op: (re)broadcast our shop's relic ids so the partner's reels can win from our stock (union pool)
+        SlotNet.BroadcastShopRelics(_player, _state.OwnShopRelicIds());
     }
 
     public override void _ExitTree()
@@ -181,6 +199,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         _closed = true;
         _manualDone?.TrySetResult(true);   // unblock a pending manual spin so its await can bail on !Alive()
         if (_player != null) _player.GoldChanged -= UpdateInfo;
+        SlotNet.PoolChanged -= UpdatePool;
         if (ReferenceEquals(_open, this)) _open = null;
     }
 
@@ -331,6 +350,12 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             20, HorizontalAlignment.Left));
         _paytableHost.AddChild(MakeLabel(SlotLoc.Ui("BINGO_NOTE"), 18, HorizontalAlignment.Left));
 
+        // shared co-op pool — take the whole accumulated pot. Only reachable on an AUTO spin (manual has no
+        // pool symbol to land), so advertise it in auto mode only.
+        if (!manual)
+            _paytableHost.AddChild(MakeLabel(
+                string.Format(SlotLoc.Ui("POOL_ROW"), FmtPct(_state.PctPool)), 20, HorizontalAlignment.Left));
+
         // bomb + lose odds (percentages only meaningful in auto mode)
         if (bomb != null)
         {
@@ -382,6 +407,13 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         if (_closed) return;
         if (_goldCost != null) SetCostText(_goldCost, $"{_player.Gold}", StsColors.cream);
         else if (_goldLabel != null) _goldLabel.Text = $"{_player.Gold}";
+    }
+
+    /// <summary>Refresh the shared-pool meter (fires on <see cref="SlotNet.PoolChanged"/>).</summary>
+    private void UpdatePool()
+    {
+        if (_closed || _poolValueLabel == null) return;
+        _poolValueLabel.Text = $"{SlotNet.SharedPool}";
     }
 
     /// <summary>Clone the shop's price display (coin + MegaLabel game font) and set its number.</summary>
@@ -543,6 +575,8 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             StartLever(0f, 0.45, Tween.TransitionType.Elastic);
 
             await PlayerCmd.LoseGold(bet, _player, GoldLossType.Spent);
+            SlotNet.SyncGoldLost(bet);       // co-op: mirror the spent bet onto the peer
+            SlotNet.AddToPool(_player, bet);  // every bet feeds the shared pool (run-long progressive pot)
             if (!Alive()) return;
 
             SpinResult roll;
@@ -614,6 +648,20 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                            : SlotLoc.Ui("BOMB_BUST");
             SetResult(bombMsg, StsColors.red);
         }
+        else if (roll.PoolWin)
+        {
+            // shared co-op pool: the roller takes the whole accumulated pot. Co-op: WinPool broadcasts and
+            // the synced handler grants on the winner's client (returns the optimistic amount for display);
+            // SP: WinPool resets the pot and returns the amount, granted inline here.
+            int amt = SlotNet.WinPool(_player);
+            if (!SlotNet.IsCoop && amt > 0)
+            {
+                await PlayerCmd.GainGold(amt, _player);
+                if (!Alive()) return;
+            }
+            if (!SlotOptions.SkipCelebration) ShowerCoins(amt);
+            SetResult(string.Format(SlotLoc.Ui("POOL_WON"), amt), Colors.Gold);
+        }
         else
         {
             // grant any relics won — hide our popup first so the relic's follow-up screen (card
@@ -633,9 +681,13 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                     try
                     {
                         if (g.ShopEntry != null && _shop != null)
-                            await g.ShopEntry.OnTryPurchaseWrapper(_shop.Inventory, ignoreCost: true);   // shop relic (free)
+                            await g.ShopEntry.OnTryPurchaseWrapper(_shop.Inventory, ignoreCost: true);   // own shop relic (free; already co-op-synced)
                         else if (g.Relic != null)
-                            await RelicCmd.Obtain(g.Relic.ToMutable(), _player);                          // jackpot relic (SignetRing → self-pays 999g)
+                        {
+                            await RelicCmd.Obtain(g.Relic.ToMutable(), _player);                          // peer-shop relic, or jackpot (SignetRing → self-pays 999g)
+                            SlotNet.SyncRelicObtained(g.Relic);                                            // co-op: mirror the obtain onto the peer
+                            if (g.IsPeerShop) SlotNet.DispatchTake(_player, g.Id);                         // co-op: remove it from the partner's shop
+                        }
                     }
                     catch (Exception ge) { MainFile.Logger.Warn($"[{MainFile.ModId}] grant failed: {ge.Message}"); }
                     if (!Alive()) return;
@@ -655,6 +707,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             {
                 if (!SlotOptions.SkipCelebration) ShowerCoins(roll.Gold);   // coins fountain out
                 await PlayerCmd.GainGold(roll.Gold, _player);               // gold counts up
+                SlotNet.SyncGoldGained(roll.Gold);                          // co-op: mirror the win onto the peer
                 if (!Alive()) return;
                 SetResult(string.Format(SlotLoc.Ui("BINGO_GOLD"), roll.Bingos, roll.Gold), Colors.Gold);
             }

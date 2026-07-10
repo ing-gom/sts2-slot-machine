@@ -31,6 +31,20 @@ A **Slay the Spire 2** mod that drops a **cabinet of spinning reels** into the m
 - **The pile is interactive.** Sweep your mouse through the coins to roll them around; click-drag to pick one up and throw it. Coins are clamped to the screen — nothing flies off-edge.
 - **The bomb blast** flashes the screen red, throws a fireball, and blows the coin pile apart.
 
+## Co-op (multiplayer)
+
+The two players' machines are **linked**, with interactions that only exist with a partner:
+
+- **Shared pool.** Every spin's bet (from either player) feeds one **shared pot** that both of you watch
+  climb. On ~5% of spins you win the **whole pot** — then it resets and starts building again. It carries
+  over across every shop for the run.
+- **Win from either shop.** Merchant stock is per-player, but your reels can also win the relics on sale
+  in **your partner's** shop.
+- **…and it's taken from them.** When you win a relic that was in your partner's shop, it **vanishes from
+  their merchant** (they get a heads-up banner). First to spin it wins it.
+- **Shared jackpot relic.** The rare 999-gold jackpot relic is **one per party** — once either of you
+  lands it, it's gone from both machines' reels.
+
 ## Options (ModConfig)
 
 - **Skip win/bomb effects** — grants and gold still pay out; only the fountain / explosion visuals are skipped.
@@ -39,7 +53,7 @@ A **Slay the Spire 2** mod that drops a **cabinet of spinning reels** into the m
 ## Notes
 
 - **Not a balance mod** — it's a casual, for-fun gambling toy. It leans slightly in the house's favor but keeps handing out gold and the occasional free relic.
-- **Solo only.** The spin outcome is rolled locally and it grants relics / changes gold, which would desync co-op — so the cabinet is **disabled in multiplayer**.
+- **Co-op supported**, with linked-machine interactions (see above). Each player spins on their own screen; payouts replicate to your partner. Both players need the mod (same version).
 - **Doesn't touch your run's RNG.** The slot uses an independent random generator, so it never disturbs card / relic / map rolls or save-scumming.
 - Languages: English, 한국어, 简体中文.
 

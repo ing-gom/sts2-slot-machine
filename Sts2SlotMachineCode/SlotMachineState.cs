@@ -17,10 +17,15 @@ internal sealed class SlotSymbol
     internal RelicModel? Relic;
     internal string Id = "";
     internal bool IsShop;
+    internal bool IsPeerShop;                // co-op: a relic on sale in the PARTNER's shop (union reel pool).
+                                             // Won via RelicCmd.Obtain + a deplete message (no local ShopEntry).
     internal bool IsBomb;
     internal bool IsJackpot;                 // the special jackpot relic (SignetRing); granted via RelicCmd.Obtain
     internal MerchantRelicEntry? ShopEntry;  // used to grant a shop relic for free
     internal Texture2D? Icon;
+
+    /// <summary>Any relic the middle-row triple can award (own shop, partner's shop, or the jackpot).</summary>
+    internal bool IsWinnableRelic => IsShop || IsPeerShop || IsJackpot;
 }
 
 /// <summary>A full 3×3 spin result (grid[col,row]) plus the (predetermined) payout it displays.</summary>
@@ -30,6 +35,7 @@ internal sealed class SpinResult
     internal int Gold;
     internal readonly List<SlotSymbol> Grants = new();   // shop relics to grant
     internal bool Bomb;
+    internal bool PoolWin;               // co-op shared pool: the roller takes the whole accumulated pot
     internal int Bingos;
     internal SlotSymbol? MissedRelic;   // a bomb spin teases this would-be relic win (then voids it)
     internal int MissedGold;            // a bomb spin teases this would-be gold (then voids it)
@@ -62,17 +68,23 @@ internal sealed class SlotMachineState
     private const int PFull  = 2;    // 0.2%  → full grid gold
     private const int PBomb  = 10;   // 1.0%  → all rewards void (RTP unchanged: freed % just becomes a plain miss)
     private const int PJackpot = 2;  // 0.2%  → jackpot relic (SignetRing, self-pays 999g) — kept rare so RTP stays sane
+    private const int PPool = 50;    // 5.0%  → win the shared co-op pool (the whole accumulated pot; see SlotNet)
 
-    internal double PctRelic => _shopIdx.Count > 0 ? PRelic / 10.0 : 0.0;
+    // A relic outcome is available if EITHER shop (own or the co-op partner's) has a winnable relic.
+    private bool HasWinnableRelic => _relicIdx.Count > 0;
+    internal double PctRelic => HasWinnableRelic ? PRelic / 10.0 : 0.0;
     internal double PctLine(int n) => (n == 1 ? PLine1 : n == 2 ? PLine2 : n == 3 ? PLine3 : 0) / 10.0;
     internal double PctFull => PFull / 10.0;
     internal double PctBomb => PBomb / 10.0;
     internal double PctJackpot => _jackpotIdx >= 0 ? PJackpot / 10.0 : 0.0;
-    internal double PctLose => (1000 - (_shopIdx.Count > 0 ? PRelic : 0) - PLine1 - PLine2 - PLine3 - PFull - PBomb
-                               - (_jackpotIdx >= 0 ? PJackpot : 0)) / 10.0;
+    internal double PctPool => PPool / 10.0;
+    internal double PctLose => (1000 - (HasWinnableRelic ? PRelic : 0) - PLine1 - PLine2 - PLine3 - PFull - PBomb
+                               - (_jackpotIdx >= 0 ? PJackpot : 0) - PPool) / 10.0;
 
     internal readonly List<SlotSymbol> Symbols = new();
-    private readonly List<int> _shopIdx = new();
+    private readonly List<int> _shopIdx = new();      // own shop relics (granted free via OnTryPurchaseWrapper)
+    private readonly List<int> _peerShopIdx = new();  // co-op: partner's shop relics (granted via Obtain + deplete)
+    private readonly List<int> _relicIdx = new();     // union of the two above — every winnable middle-row relic
     private readonly List<int> _fillerIdx = new();
     private readonly List<int> _stripPool = new();   // weighted symbol bag for MANUAL free-spin reels (bomb rare)
     private int _bombIdx = -1;
@@ -159,8 +171,11 @@ internal sealed class SlotMachineState
     {
         Symbols.Clear();
         _shopIdx.Clear();
+        _peerShopIdx.Clear();
+        _relicIdx.Clear();
         _fillerIdx.Clear();
 
+        var ownIds = new HashSet<string>();
         try
         {
             var entries = _shop?.Inventory?.RelicEntries;
@@ -169,33 +184,64 @@ internal sealed class SlotMachineState
                     if (e?.Model != null)
                     {
                         _shopIdx.Add(Symbols.Count);
+                        ownIds.Add(e.Model.Id.Entry);
                         Symbols.Add(new SlotSymbol { Relic = e.Model, Id = e.Model.Id.Entry, IsShop = true, ShopEntry = e, Icon = e.Model.Icon });
                     }
         }
         catch (Exception ex) { MainFile.Logger.Warn($"[{MainFile.ModId}] read shop relics failed: {ex.Message}"); }
 
+        // Co-op union reel pool: also include relics on sale in the PARTNER's shop (the linked machines can
+        // win from either stock). The peer broadcasts its relic ids (SlotNet.PeerShopRelicIds); resolve each
+        // to a model here. Skip anything we already sell, the jackpot relic, or ids that don't resolve.
+        try
+        {
+            foreach (var id in SlotNet.PeerShopRelicIds())
+            {
+                if (ownIds.Contains(id) || (_jackpot != null && id == _jackpot.Id)) continue;
+                var model = ModelDb.AllRelics.FirstOrDefault(r => r.Id.Entry == id);
+                Texture2D? icon = null;
+                try { icon = model?.Icon; } catch { }
+                if (model == null || icon == null) continue;
+                _peerShopIdx.Add(Symbols.Count);
+                Symbols.Add(new SlotSymbol { Relic = model, Id = id, IsPeerShop = true, Icon = icon });
+            }
+        }
+        catch (Exception ex) { MainFile.Logger.Warn($"[{MainFile.ModId}] read peer shop relics failed: {ex.Message}"); }
+
+        _relicIdx.AddRange(_shopIdx);
+        _relicIdx.AddRange(_peerShopIdx);
+
         foreach (var f in _fillers) { _fillerIdx.Add(Symbols.Count); Symbols.Add(f); }
         if (_bomb != null) { _bombIdx = Symbols.Count; Symbols.Add(_bomb); }
-        // Jackpot relic is ONE-TIME: once the player owns it, drop the symbol entirely (a Refresh after the
-        // win re-runs this, so the jackpot stops appearing on the reels).
+        // Jackpot relic is ONE-TIME (now PARTY-WIDE): once ANY player owns it, drop the symbol entirely (a
+        // Refresh after the win re-runs this, so the jackpot stops appearing on everyone's reels).
         _jackpotIdx = -1;
         if (_jackpot != null && !PlayerOwnsJackpot()) { _jackpotIdx = Symbols.Count; Symbols.Add(_jackpot); }
 
-        // Weighted bag for manual free-spin reels: fillers common, shop relics medium, bomb & jackpot rare —
-        // so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
+        // Weighted bag for manual free-spin reels: fillers common, relics (own + peer) medium, bomb & jackpot
+        // rare — so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
         _stripPool.Clear();
-        foreach (var s in _shopIdx)   for (int k = 0; k < 3; k++) _stripPool.Add(s);   // shop relic weight 3
+        foreach (var s in _relicIdx)  for (int k = 0; k < 3; k++) _stripPool.Add(s);   // shop + peer relic weight 3
         foreach (var f in _fillerIdx) for (int k = 0; k < 4; k++) _stripPool.Add(f);   // filler weight 4
         if (_bombIdx >= 0) _stripPool.Add(_bombIdx);                                    // bomb weight 1
         if (_jackpotIdx >= 0) _stripPool.Add(_jackpotIdx);                              // jackpot weight 1 (rare)
     }
 
-    /// <summary>True once the player already owns the jackpot relic (SignetRing) — then it's retired.</summary>
+    /// <summary>The ids of the relics on sale in THIS player's shop — broadcast to the co-op partner so
+    /// their reels can win from our stock too (see <see cref="SlotNet.BroadcastShopRelics"/>).</summary>
+    internal IEnumerable<string> OwnShopRelicIds()
+    {
+        foreach (var i in _shopIdx)
+            if (i >= 0 && i < Symbols.Count) yield return Symbols[i].Id;
+    }
+
+    /// <summary>True once ANY player in the run owns the jackpot relic (SignetRing) — then it's retired for
+    /// the whole party (co-op: a win by either player drops it from everyone's reels). SP: just the one
+    /// player.</summary>
     private bool PlayerOwnsJackpot()
     {
-        if (_jackpot?.Relic == null || _player == null) return false;
-        try { return _player.Relics.Any(r => r != null && r.Id.Entry == _jackpot.Id); }
-        catch { return false; }
+        if (_jackpot?.Relic == null) return false;
+        return SlotNet.AnyPlayerOwns(_jackpot.Id);
     }
 
     /// <summary>A weighted symbol for a MANUAL free-spinning reel strip (bomb is rare here).</summary>
@@ -222,9 +268,9 @@ internal sealed class SlotMachineState
         {
             res.Grants.Add(Symbols[_jackpotIdx]); res.Bingos = 1; res.Gold = 0; return res;   // JACKPOT relic
         }
-        if (midTriple && Symbols[mid].IsShop)
+        if (midTriple && (Symbols[mid].IsShop || Symbols[mid].IsPeerShop))
         {
-            res.Grants.Add(Symbols[mid]); res.Bingos = 1; res.Gold = 0; return res;   // middle shop triple → relic
+            res.Grants.Add(Symbols[mid]); res.Bingos = 1; res.Gold = 0; return res;   // middle relic triple → relic
         }
 
         int n = 0;
@@ -253,13 +299,14 @@ internal sealed class SlotMachineState
             string f = Forced; Forced = null;
             switch (f.ToLowerInvariant())
             {
-                case "relic": if (_shopIdx.Count > 0) BuildRelic(res); else BuildLose(res); break;
+                case "relic": if (HasWinnableRelic) BuildRelic(res); else BuildLose(res); break;
                 case "1": BuildLines(res, 1); break;
                 case "2": BuildLines(res, 2); break;
                 case "3": BuildLines(res, 3); break;
                 case "full": BuildFull(res); break;
                 case "bomb": BuildBomb(res); break;
                 case "jackpot": if (_jackpotIdx >= 0) BuildJackpot(res); else BuildLose(res); break;
+                case "pool": BuildPool(res); break;
                 default: BuildLose(res); break;
             }
             return res;
@@ -267,13 +314,14 @@ internal sealed class SlotMachineState
 
         int r = _rng.Next(1000);
         int cum = 0;
-        if (_shopIdx.Count > 0 && r < (cum += PRelic)) BuildRelic(res);
+        if (HasWinnableRelic && r < (cum += PRelic)) BuildRelic(res);
         else if (r < (cum += PLine1)) BuildLines(res, 1);
         else if (r < (cum += PLine2)) BuildLines(res, 2);
         else if (r < (cum += PLine3)) BuildLines(res, 3);
         else if (r < (cum += PFull)) BuildFull(res);
         else if (r < (cum += PBomb)) BuildBomb(res);
         else if (_jackpotIdx >= 0 && r < (cum += PJackpot)) BuildJackpot(res);
+        else if (r < (cum += PPool)) BuildPool(res);
         else BuildLose(res);
         return res;
     }
@@ -347,21 +395,21 @@ internal sealed class SlotMachineState
         // A bomb doesn't just miss — it TEASES. Build a would-be win (a middle-row relic triple, or a
         // couple of gold bingo lines), then drop the bomb on a cell OUTSIDE that winning line: the reward
         // is fully visible but voided. Feels like it was snatched away right at the finish.
-        bool teaseRelic = _shopIdx.Count > 0 && _rng.Next(100) < 60;
+        bool teaseRelic = _relicIdx.Count > 0 && _rng.Next(100) < 60;
         var freeRows = new List<int>();
 
         if (teaseRelic)
         {
-            int shop = _shopIdx[_rng.Next(_shopIdx.Count)];
+            int relic = _relicIdx[_rng.Next(_relicIdx.Count)];
             for (int attempt = 0; attempt < 100; attempt++)
             {
                 FillLoseRow(res.Grid, 0);
                 FillLoseRow(res.Grid, 2);
-                for (int c = 0; c < 3; c++) res.Grid[c, 1] = shop;   // middle row = would-be relic win
+                for (int c = 0; c < 3; c++) res.Grid[c, 1] = relic;   // middle row = would-be relic win
                 if (CountBingos(res.Grid) == 1) break;
             }
             freeRows.Add(0); freeRows.Add(2);
-            res.MissedRelic = Symbols[shop];
+            res.MissedRelic = Symbols[relic];
         }
         else
         {
@@ -393,16 +441,25 @@ internal sealed class SlotMachineState
 
     private void BuildRelic(SpinResult res)
     {
-        int shop = _shopIdx[_rng.Next(_shopIdx.Count)];
+        int relic = _relicIdx[_rng.Next(_relicIdx.Count)];   // own shop OR the partner's shop (union pool)
         for (int attempt = 0; attempt < 100; attempt++)
         {
             FillLoseRow(res.Grid, 0);
             FillLoseRow(res.Grid, 2);
-            for (int c = 0; c < 3; c++) res.Grid[c, 1] = shop;   // middle row = shop triple
-            if (CountBingos(res.Grid) == 1) break;               // only the middle line → no extra gold
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = relic;   // middle row = relic triple
+            if (CountBingos(res.Grid) == 1) break;                // only the middle line → no extra gold
         }
-        res.Grants.Add(Symbols[shop]);
+        res.Grants.Add(Symbols[relic]);
         res.Bingos = 1; res.Gold = 0;   // a relic win pays NO gold
+    }
+
+    private void BuildPool(SpinResult res)
+    {
+        // Celebrate a shared-pool hit with a full matching grid (a "big win" look); the payout is the
+        // whole accumulated pool, resolved by the popup via SlotNet.
+        int s = RandomFiller();
+        for (int c = 0; c < 3; c++) for (int r2 = 0; r2 < 3; r2++) res.Grid[c, r2] = s;
+        res.PoolWin = true; res.Bingos = 0; res.Gold = 0;
     }
 
     private void BuildJackpot(SpinResult res)

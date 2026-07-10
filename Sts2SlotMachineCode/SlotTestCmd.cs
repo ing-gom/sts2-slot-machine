@@ -21,11 +21,11 @@ namespace Sts2SlotMachine;
 /// </summary>
 public class SlotTestCmd : AbstractConsoleCmd
 {
-    private static readonly string[] Outcomes = { "relic", "jackpot", "1", "2", "3", "full", "bomb", "lose" };
-    private static readonly string[] Completions = { "relic", "jackpot", "1", "2", "3", "full", "bomb", "lose", "courier" };
+    private static readonly string[] Outcomes = { "relic", "jackpot", "pool", "1", "2", "3", "full", "bomb", "lose" };
+    private static readonly string[] Completions = { "relic", "jackpot", "pool", "1", "2", "3", "full", "bomb", "lose", "courier" };
 
     public override string CmdName => "slot";
-    public override string Args => "[relic|jackpot|1|2|3|full|bomb|lose|courier]";
+    public override string Args => "[relic|jackpot|pool|1|2|3|full|bomb|lose|courier]";
     public override string Description => "Open the shop slot machine (test). Arg forces the next spin's outcome; 'courier' grants TheCourier (shop refills) to test reel refill.";
     public override bool IsNetworked => false;
     public override bool DebugOnly => false;

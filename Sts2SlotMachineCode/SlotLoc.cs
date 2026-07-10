@@ -44,6 +44,12 @@ internal static class SlotLoc
         ["UI.BOMB_LABEL"]      = ("All rewards lost", "모든 보상 소멸", "所有奖励消失"),
         ["UI.LOSE_LABEL"]      = ("Miss", "꽝", "未中"),
 
+        // co-op (linked machines) — shared gold pool + a partner stealing a relic from your shop
+        ["UI.POOL_LABEL"]      = ("Shared pool", "공동 항아리", "共享奖池"),
+        ["UI.POOL_ROW"]        = ("Shared pool  ({0}%) → take it all!", "공동 항아리  ({0}%) → 전액 획득!", "共享奖池  ({0}%) → 全部拿走！"),
+        ["UI.POOL_WON"]        = ("★★ SHARED POOL!  +{0} ★★", "★★ 공동 항아리!  +{0} ★★", "★★ 共享奖池！  +{0} ★★"),
+        ["UI.TAKEN_BY_PARTNER"] = ("Your partner won this from your shop!", "동료가 상점에서 이 유물을 슬롯으로 가져갔습니다!", "队友用转盘从你的商店赢走了它！"),
+
         // ModConfig option labels + descriptions (the in-game settings tab). Fed to ModConfigBridge, which
         // takes plain strings — so localization happens here, resolved to the game's language at register time.
         ["UI.CFG_FX_LABEL"]     = ("Skip win/bomb effects", "당첨 연출 끄기 (분수·폭발)", "关闭中奖/炸弹特效"),
