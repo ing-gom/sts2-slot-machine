@@ -20,6 +20,7 @@ internal sealed class SlotSymbol
     internal bool IsPeerShop;                // co-op: a relic on sale in the PARTNER's shop (union reel pool).
                                              // Won via RelicCmd.Obtain + a deplete message (no local ShopEntry).
     internal bool IsBomb;
+    internal bool IsPool;                    // co-op: the "prize pot" symbol — a middle-row triple wins the shared pot
     internal bool IsJackpot;                 // the special jackpot relic (SignetRing); granted via RelicCmd.Obtain
     internal MerchantRelicEntry? ShopEntry;  // used to grant a shop relic for free
     internal Texture2D? Icon;
@@ -68,18 +69,20 @@ internal sealed class SlotMachineState
     private const int PFull  = 2;    // 0.2%  → full grid gold
     private const int PBomb  = 10;   // 1.0%  → all rewards void (RTP unchanged: freed % just becomes a plain miss)
     private const int PJackpot = 2;  // 0.2%  → jackpot relic (SignetRing, self-pays 999g) — kept rare so RTP stays sane
-    private const int PPool = 50;    // 5.0%  → win the shared co-op pool (the whole accumulated pot; see SlotNet)
+    private const int PPool = 30;    // 3.0%  → win the shared co-op pool (the whole accumulated pot; see SlotNet)
 
     // A relic outcome is available if EITHER shop (own or the co-op partner's) has a winnable relic.
     private bool HasWinnableRelic => _relicIdx.Count > 0;
+    // The shared prize pot is a CO-OP-only feature (no partner → no shared pot, no pool outcome).
+    internal bool PoolActive => SlotNet.IsCoop;
     internal double PctRelic => HasWinnableRelic ? PRelic / 10.0 : 0.0;
     internal double PctLine(int n) => (n == 1 ? PLine1 : n == 2 ? PLine2 : n == 3 ? PLine3 : 0) / 10.0;
     internal double PctFull => PFull / 10.0;
     internal double PctBomb => PBomb / 10.0;
     internal double PctJackpot => _jackpotIdx >= 0 ? PJackpot / 10.0 : 0.0;
-    internal double PctPool => PPool / 10.0;
+    internal double PctPool => PoolActive ? PPool / 10.0 : 0.0;
     internal double PctLose => (1000 - (HasWinnableRelic ? PRelic : 0) - PLine1 - PLine2 - PLine3 - PFull - PBomb
-                               - (_jackpotIdx >= 0 ? PJackpot : 0) - PPool) / 10.0;
+                               - (_jackpotIdx >= 0 ? PJackpot : 0) - (PoolActive ? PPool : 0)) / 10.0;
 
     internal readonly List<SlotSymbol> Symbols = new();
     private readonly List<int> _shopIdx = new();      // own shop relics (granted free via OnTryPurchaseWrapper)
@@ -89,12 +92,14 @@ internal sealed class SlotMachineState
     private readonly List<int> _stripPool = new();   // weighted symbol bag for MANUAL free-spin reels (bomb rare)
     private int _bombIdx = -1;
     private int _jackpotIdx = -1;
+    private int _poolIdx = -1;
     private readonly System.Random _rng = new();
     private NMerchantInventory? _shop;
     private Player? _player;         // to check whether the (1-time) jackpot relic is already owned
     private List<SlotSymbol> _fillers = new();
     private SlotSymbol? _bomb;
     private SlotSymbol? _jackpot;   // SignetRing — the Ancient relic that self-grants 999 gold on obtain
+    private SlotSymbol? _pool;      // co-op "prize pot" symbol — a middle-row triple wins the shared pot
 
     internal int Count => Symbols.Count;
     internal Texture2D? Icon(int i) => (i >= 0 && i < Symbols.Count) ? Symbols[i].Icon : null;
@@ -106,6 +111,11 @@ internal sealed class SlotMachineState
     {
         var st = new SlotMachineState { _shop = shop, _player = player };
         st._bomb = new SlotSymbol { Id = "BOMB", IsBomb = true, Icon = SlotArt.LoadPng("slot_bomb.png") };
+        // Prize-pot symbol (co-op): the SAME coin the shop shows next to the accumulated-prize amount — a
+        // middle-row triple wins the pot, so the reel symbol matches the number it pays. Falls back to the
+        // generic gold coin if the shop's price coin can't be read.
+        var coin = ShopCostCoin(shop);
+        if (coin != null) st._pool = new SlotSymbol { Id = "POOL", IsPool = true, Icon = coin };
         // Jackpot symbol = SignetRing (Ancient relic that self-grants 999 gold on obtain). Its own icon is
         // the reel symbol, so hitting it on the payline literally wins "the 999 relic".
         try
@@ -122,6 +132,38 @@ internal sealed class SlotMachineState
     }
 
     internal void Refresh() => Rebuild();
+
+    /// <summary>The game's gold coin sprite (the prize-pot reel symbol); null if it can't be loaded.</summary>
+    private static Texture2D? LoadCoinIcon()
+    {
+        try { return ResourceLoader.Load<Texture2D>("res://images/packed/sprite_fonts/gold_icon.png", null, ResourceLoader.CacheMode.Reuse); }
+        catch { return null; }
+    }
+
+    /// <summary>The coin sprite the shop shows next to prices (its "Cost" widget) — the same coin drawn
+    /// beside the accumulated-prize amount, so the pool reel symbol matches. Falls back to the generic
+    /// gold coin if the shop isn't available or the widget can't be read.</summary>
+    private static Texture2D? ShopCostCoin(NMerchantInventory? shop)
+    {
+        try
+        {
+            if (shop?._cardRemovalNode?.GetNodeOrNull("Cost") is Control cost && FindTextureRect(cost) is TextureRect tr)
+                return tr.Texture;
+        }
+        catch { }
+        return LoadCoinIcon();
+    }
+
+    private static TextureRect? FindTextureRect(Node n)
+    {
+        if (n is TextureRect t && t.Texture != null) return t;
+        foreach (var c in n.GetChildren())
+        {
+            var f = FindTextureRect(c);
+            if (f != null) return f;
+        }
+        return null;
+    }
 
     // Pick FillerCount VANILLA relics not sold in this shop (so reel fillers never duplicate a buyable
     // relic, and never a mod relic). Sampled once.
@@ -217,6 +259,10 @@ internal sealed class SlotMachineState
         // Refresh after the win re-runs this, so the jackpot stops appearing on everyone's reels).
         _jackpotIdx = -1;
         if (_jackpot != null && !PlayerOwnsJackpot()) { _jackpotIdx = Symbols.Count; Symbols.Add(_jackpot); }
+
+        // Prize-pot symbol: only ever placed by BuildPool (never a filler / relic / manual-strip symbol).
+        _poolIdx = -1;
+        if (_pool != null) { _poolIdx = Symbols.Count; Symbols.Add(_pool); }
 
         // Weighted bag for manual free-spin reels: fillers common, relics (own + peer) medium, bomb & jackpot
         // rare — so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
@@ -321,7 +367,7 @@ internal sealed class SlotMachineState
         else if (r < (cum += PFull)) BuildFull(res);
         else if (r < (cum += PBomb)) BuildBomb(res);
         else if (_jackpotIdx >= 0 && r < (cum += PJackpot)) BuildJackpot(res);
-        else if (r < (cum += PPool)) BuildPool(res);
+        else if (PoolActive && r < (cum += PPool)) BuildPool(res);   // co-op only
         else BuildLose(res);
         return res;
     }
@@ -455,10 +501,16 @@ internal sealed class SlotMachineState
 
     private void BuildPool(SpinResult res)
     {
-        // Celebrate a shared-pool hit with a full matching grid (a "big win" look); the payout is the
-        // whole accumulated pool, resolved by the popup via SlotNet.
-        int s = RandomFiller();
-        for (int c = 0; c < 3; c++) for (int r2 = 0; r2 < 3; r2++) res.Grid[c, r2] = s;
+        // A middle-row triple of the prize-pot (coin) symbol — "the pot lines up on the payline" — distinct
+        // from the full-grid jackpot look. The payout (the whole pot) is resolved by the popup via SlotNet.
+        if (_poolIdx < 0) { BuildLose(res); res.PoolWin = true; return; }   // no pot symbol → still flag the win
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            FillLoseRow(res.Grid, 0);
+            FillLoseRow(res.Grid, 2);
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = _poolIdx;   // middle row = prize-pot triple
+            if (CountBingos(res.Grid) == 1) break;
+        }
         res.PoolWin = true; res.Bingos = 0; res.Gold = 0;
     }
 

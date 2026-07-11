@@ -19,7 +19,8 @@ namespace Sts2SlotMachine;
 /// <item><c>pooladd &lt;n&gt;</c> — add a bet to the shared pool mirror.</item>
 /// <item><c>poolwin</c> — reset the pool; the winner's own client grants the gold.</item>
 /// <item><c>shop &lt;id&gt;…</c> — cache the sender's shop relic ids (union reel pool).</item>
-/// <item><c>take &lt;relicEntry&gt;</c> — peers clear that relic from their own shop (deplete).</item>
+/// <item><c>take &lt;relicEntry&gt;</c> — peers clear that relic from their own shop (deplete) + toast the win.</item>
+/// <item><c>jackpot &lt;relicEntry&gt;</c> — announce a jackpot-relic win to the other players (toast only).</item>
 /// </list>
 ///
 /// Reuses the game's BUILT-IN <c>NetConsoleCmdGameAction</c> wire type (a plain string payload), so the
@@ -70,6 +71,10 @@ public sealed class SlotNetConsoleCmd : AbstractConsoleCmd
             case "take":
                 if (args.Length >= 2) SlotNet.ApplyTake(issuingPlayer, args[1]);
                 return new CmdResult(success: true, "slot_sync take");
+
+            case "jackpot":
+                if (args.Length >= 2) SlotNet.ApplyJackpotWon(issuingPlayer, args[1]);
+                return new CmdResult(success: true, "slot_sync jackpot");
 
             default:
                 return new CmdResult(success: true, $"slot_sync: unknown op '{op}'");

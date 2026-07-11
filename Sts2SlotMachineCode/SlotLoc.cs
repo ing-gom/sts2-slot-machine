@@ -44,11 +44,19 @@ internal static class SlotLoc
         ["UI.BOMB_LABEL"]      = ("All rewards lost", "모든 보상 소멸", "所有奖励消失"),
         ["UI.LOSE_LABEL"]      = ("Miss", "꽝", "未中"),
 
-        // co-op (linked machines) — shared gold pool + a partner stealing a relic from your shop
-        ["UI.POOL_LABEL"]      = ("Shared pool", "공동 항아리", "共享奖池"),
-        ["UI.POOL_ROW"]        = ("Shared pool  ({0}%) → take it all!", "공동 항아리  ({0}%) → 전액 획득!", "共享奖池  ({0}%) → 全部拿走！"),
-        ["UI.POOL_WON"]        = ("★★ SHARED POOL!  +{0} ★★", "★★ 공동 항아리!  +{0} ★★", "★★ 共享奖池！  +{0} ★★"),
-        ["UI.TAKEN_BY_PARTNER"] = ("Your partner won this from your shop!", "동료가 상점에서 이 유물을 슬롯으로 가져갔습니다!", "队友用转盘从你的商店赢走了它！"),
+        // co-op (linked machines) — slot-machine prize pot (accumulated) + a partner taking a relic from your shop
+        ["UI.POOL_LABEL"]      = ("Prize pot", "슬롯머신 누적 상금", "累计奖金"),
+        ["UI.POOL_ROW"]        = ("Prize pot  ({0}%) → take it all!", "누적 상금  ({0}%) → 전액 획득!", "累计奖金  ({0}%) → 全部拿走！"),
+        ["UI.POOL_WON"]        = ("★★ PRIZE POT!  +{0} ★★", "★★ 누적 상금 획득!  +{0} ★★", "★★ 累计奖金！  +{0} ★★"),
+        ["UI.TAKEN_BY_PARTNER"] = ("Your partner won this relic!  Taken from your shop.",
+                                   "동료가 이 유물에 당첨되었습니다!  당신의 상점에서 가져갑니다.",
+                                   "队友中奖赢得了这件遗物！  从你的商店取走。"),
+        // shown to every OTHER player (not the winner, not the shop it came from) — a plain "won it" notice
+        ["UI.RELIC_WON_BY_PARTNER"] = ("Your partner won this relic!", "동료가 이 유물에 당첨되었습니다!", "队友中奖赢得了这件遗物！"),
+        // partner hit the jackpot relic — broadcast to everyone else
+        ["UI.JACKPOT_WON_BY_PARTNER"] = ("Your partner hit the JACKPOT!", "동료가 잭팟에 당첨되었습니다!", "队友中了大奖！"),
+        // partner won the shared prize pot ({0} = amount) — broadcast to everyone else
+        ["UI.POOL_WON_BY_PARTNER"] = ("Your partner won the {0} prize pot!", "동료가 누적 상금 {0}에 당첨되었습니다!", "队友赢得了 {0} 累计奖金！"),
 
         // ModConfig option labels + descriptions (the in-game settings tab). Fed to ModConfigBridge, which
         // takes plain strings — so localization happens here, resolved to the game's language at register time.

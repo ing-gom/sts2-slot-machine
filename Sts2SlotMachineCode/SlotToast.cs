@@ -6,24 +6,43 @@ using MegaCrit.Sts2.Core.Models;               // RelicModel
 namespace Sts2SlotMachine;
 
 /// <summary>
-/// A small transient banner shown top-centre when the co-op partner wins one of YOUR shop's relics on
-/// their slot machine (so the relic vanishing from your stock is legible, not confusing). Its own
-/// short-lived <see cref="CanvasLayer"/> — relic icon + a localized line — that slides in and fades out.
-/// Purely local/visual: no game state, no sync.
+/// A small transient banner shown top-centre when a co-op partner WINS on their slot machine — a shop
+/// relic (from your stock or another's), the jackpot relic, or the shared prize pot — so every other
+/// player is told what the partner just won. Its own short-lived <see cref="CanvasLayer"/> — icon + a
+/// localized line — that slides in and fades out. Purely local/visual: no game state, no sync.
 /// </summary>
 internal sealed partial class SlotToast : CanvasLayer
 {
-    /// <summary>Announce that the partner took <paramref name="relic"/> from the local shop.</summary>
-    internal static void ShowRelicTaken(RelicModel relic)
+    /// <summary>A partner won a shop relic. <paramref name="fromMyShop"/> → it came from THIS player's own
+    /// stock ("taken from your shop"); otherwise a plain "won it" notice for the other players.</summary>
+    internal static void ShowRelicWon(RelicModel? relic, bool fromMyShop)
+        => Show(relic?.Icon, SlotLoc.Ui(fromMyShop ? "TAKEN_BY_PARTNER" : "RELIC_WON_BY_PARTNER"));
+
+    /// <summary>A partner hit the jackpot relic — announced to every other player.</summary>
+    internal static void ShowJackpotWon(RelicModel? relic)
+        => Show(relic?.Icon, SlotLoc.Ui("JACKPOT_WON_BY_PARTNER"));
+
+    /// <summary>A partner won the shared prize pot (<paramref name="amount"/>) — announced to everyone else.</summary>
+    internal static void ShowPoolWon(int amount)
+        => Show(CoinIcon(), string.Format(SlotLoc.Ui("POOL_WON_BY_PARTNER"), amount));
+
+    private static void Show(Texture2D? icon, string message)
     {
         try
         {
             if (Engine.GetMainLoop() is not SceneTree tree) return;
             var toast = new SlotToast();
             tree.Root.AddChild(toast);
-            toast.Build(relic?.Icon, SlotLoc.Ui("TAKEN_BY_PARTNER"));
+            toast.Build(icon, message);
         }
-        catch (Exception e) { MainFile.Logger.Warn($"[{MainFile.ModId}] take toast failed: {e.Message}"); }
+        catch (Exception e) { MainFile.Logger.Warn($"[{MainFile.ModId}] win toast failed: {e.Message}"); }
+    }
+
+    /// <summary>The game's gold coin sprite (for the prize-pot toast); null if it can't be loaded.</summary>
+    private static Texture2D? CoinIcon()
+    {
+        try { return ResourceLoader.Load<Texture2D>("res://images/packed/sprite_fonts/gold_icon.png", null, ResourceLoader.CacheMode.Reuse); }
+        catch { return null; }
     }
 
     private void Build(Texture2D? icon, string message)

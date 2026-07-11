@@ -108,13 +108,12 @@ internal static class SlotNet
         try { PoolChanged?.Invoke(); } catch { }
     }
 
-    /// <summary>Add a bet to the shared pool. Co-op: broadcast so every client's mirror agrees (applied
-    /// in queue order). SP / fake-MP: mutate locally.</summary>
+    /// <summary>Add a bet to the shared prize pot. CO-OP ONLY (no partner → no shared pot): broadcast so
+    /// every client's mirror agrees, applied in queue order. No-op in single-player.</summary>
     internal static void AddToPool(Player bettor, int amount)
     {
-        if (amount <= 0) return;
-        if (IsCoop) Dispatch(bettor, $"pooladd {amount}");
-        else { SharedPool += amount; RaisePoolChanged(); }
+        if (amount <= 0 || !IsCoop) return;
+        Dispatch(bettor, $"pooladd {amount}");
     }
 
     /// <summary>Award the whole pool to <paramref name="winner"/> and reset it. Co-op: broadcast; every
@@ -135,7 +134,9 @@ internal static class SlotNet
     internal static void ApplyPoolWin(Player winner)
     {
         int amt = SharedPool; SharedPool = 0; RaisePoolChanged();
-        if (amt > 0 && LocalContext.IsMe(winner)) _ = GrantPoolAsync(amt, winner);
+        if (amt <= 0) return;
+        if (LocalContext.IsMe(winner)) _ = GrantPoolAsync(amt, winner);   // winner: grant + own celebration
+        else SlotToast.ShowPoolWon(amt);                                  // everyone else: announce it
     }
 
     private static async Task GrantPoolAsync(int amt, Player winner)
@@ -190,23 +191,64 @@ internal static class SlotNet
         Dispatch(taker, $"take {relicEntry}");
     }
 
-    /// <summary>Handler (every client): peers (not the taker) clear that relic from their OWN shop.</summary>
+    /// <summary>Handler (every client): clear that relic from the LOCAL shop, so a DUPLICATE copy on ANY
+    /// player's shop is depleted too — once someone wins it, it's gone everywhere. The taker's own shop was
+    /// already cleared by its purchase path (a no-op here) and the taker gets no "partner took it" banner.</summary>
     internal static void ApplyTake(Player taker, string relicEntry)
     {
-        if (LocalContext.IsMe(taker)) return;   // the taker's own shop is handled by its own purchase path
-        DepleteLocalShopRelic(relicEntry);
+        var depleted = DepleteLocalShopRelic(relicEntry);   // remove from the local shop if it's on sale here
+        PurgePeerShopRelic(relicEntry);                     // drop it from the union reel pool / list on EVERY client
+        // Announce the win to every OTHER player: the shop it came from sees "taken from your shop"; the rest
+        // see a plain "won it" notice. The winner already gets their own celebration, so skip their client.
+        if (!LocalContext.IsMe(taker))
+            SlotToast.ShowRelicWon(depleted ?? ResolveRelic(relicEntry), fromMyShop: depleted != null);
     }
 
-    /// <summary>Find the relic in the LOCAL merchant's stock and clear its slot (without granting it) so
-    /// it disappears — the partner won it on their machine. Best-effort: no-op if the relic is already
-    /// gone (bought first, or a race) or we're not in a shop.</summary>
-    private static void DepleteLocalShopRelic(string relicEntry)
+    /// <summary>Resolve a relic entry id to its model (for a toast icon when it isn't in the local shop).</summary>
+    private static RelicModel? ResolveRelic(string relicEntry)
+    {
+        try { return ModelDb.AllRelics.FirstOrDefault(r => r.Id.Entry == relicEntry); }
+        catch { return null; }
+    }
+
+    /// <summary>Broadcast that <paramref name="winner"/> hit the JACKPOT relic — every other client toasts it.
+    /// The jackpot isn't in any shop (no deplete), so it rides its own op rather than <c>take</c>.</summary>
+    internal static void AnnounceJackpotWon(Player winner, string relicEntry)
+    {
+        if (!IsCoop || string.IsNullOrEmpty(relicEntry)) return;
+        Dispatch(winner, $"jackpot {relicEntry}");
+    }
+
+    /// <summary>Handler (every client): a partner won the jackpot → toast it on the non-winner clients.</summary>
+    internal static void ApplyJackpotWon(Player winner, string relicEntry)
+    {
+        if (LocalContext.IsMe(winner)) return;
+        SlotToast.ShowJackpotWon(ResolveRelic(relicEntry));
+    }
+
+    /// <summary>Remove a relic id from every cached peer shop list (a won/depleted relic leaves the union
+    /// reel pool) and notify any open machine to rebuild its reels + paytable. Runs on all clients so the
+    /// taker's OWN reels stop offering the relic too (its <see cref="_peerShops"/> entry still held it).</summary>
+    private static void PurgePeerShopRelic(string relicEntry)
+    {
+        if (string.IsNullOrEmpty(relicEntry)) return;
+        bool changed = false;
+        foreach (var kv in _peerShops)
+            if (kv.Value.RemoveAll(id => id == relicEntry) > 0) changed = true;
+        if (changed) { try { ShopListChanged?.Invoke(); } catch { } }
+    }
+
+    /// <summary>Find the relic in the LOCAL merchant's stock and clear its slot (without granting it) so it
+    /// disappears — someone won it. Returns the depleted relic model (so the caller can toast it as "from
+    /// your shop"), or null if it wasn't on sale here (already bought, a race, we're not in a shop, or this
+    /// client isn't the seller).</summary>
+    private static RelicModel? DepleteLocalShopRelic(string relicEntry)
     {
         try
         {
-            if (Engine.GetMainLoop() is not SceneTree tree) return;
+            if (Engine.GetMainLoop() is not SceneTree tree) return null;
             var inv = FindNode<NMerchantInventory>(tree.Root)?.Inventory;   // MerchantInventory
-            if (inv?.RelicEntries == null) return;
+            if (inv?.RelicEntries == null) return null;
             foreach (var e in inv.RelicEntries)
             {
                 if (e?.Model == null || e.Model.Id.Entry != relicEntry) continue;
@@ -216,14 +258,14 @@ internal static class SlotNet
                 e.GetType().GetMethod("ClearAfterPurchase", BindingFlags.NonPublic | BindingFlags.Instance)
                     ?.Invoke(e, null);
                 e.OnMerchantInventoryUpdated();
-                SlotToast.ShowRelicTaken(model);
-                break;
+                return model;
             }
         }
         catch (Exception ex)
         {
             MainFile.Logger.Warn($"[{MainFile.ModId}] deplete '{relicEntry}' failed: {ex.Message}");
         }
+        return null;
     }
 
     // ---- transport ----
