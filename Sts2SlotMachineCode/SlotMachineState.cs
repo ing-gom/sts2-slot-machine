@@ -55,9 +55,10 @@ internal sealed class SlotMachineState
 
     // Gold by NUMBER of bingo lines (index = line count; 8 = full 3×3). Only 1/2/3/8 occur in AUTO mode
     // (manual mode can hit 4-7). MUST stay monotonically increasing. TUNE HERE.
-    // 1/2/3 lines = 1.8× the original curve (36/90/270); the full 3×3 is a FIXED 999 jackpot regardless of
-    // bet; 4-7 lines ramp between them (they're essentially unreachable, only there to keep the curve sane).
-    private static readonly int[] BingoGold = { 0, 36, 90, 270, 450, 600, 750, 870, 999 };
+    // 1/2/3 lines = 1.8× the original curve (36/90/270); the full 3×3 is a FIXED 777 jackpot (the classic
+    // triple-seven slot payout) regardless of bet; 4-7 lines ramp between 3-lines and the 777 top (they're
+    // essentially unreachable in auto, manual-only, kept ≤ 777 so the curve stays monotonic).
+    private static readonly int[] BingoGold = { 0, 36, 90, 270, 400, 520, 640, 720, 777 };
     internal int GoldForBingos(int n) => n <= 0 ? 0 : BingoGold[Math.Min(n, BingoGold.Length - 1)];
 
     // Outcome probabilities in PER-MILLE (‰). Lose = whatever is left. TUNE HERE.
@@ -260,9 +261,11 @@ internal sealed class SlotMachineState
         _jackpotIdx = -1;
         if (_jackpot != null && !PlayerOwnsJackpot()) { _jackpotIdx = Symbols.Count; Symbols.Add(_jackpot); }
 
-        // Prize-pot symbol: only ever placed by BuildPool (never a filler / relic / manual-strip symbol).
+        // Prize-pot symbol: CO-OP ONLY (the shared pot doesn't exist in single-player). Only placed by
+        // BuildPool, but it must also be absent from the whole Symbols list in SP so RollOne() never flashes
+        // the coin on the whizzing reel cells where it means nothing.
         _poolIdx = -1;
-        if (_pool != null) { _poolIdx = Symbols.Count; Symbols.Add(_pool); }
+        if (_pool != null && PoolActive) { _poolIdx = Symbols.Count; Symbols.Add(_pool); }
 
         // Weighted bag for manual free-spin reels: fillers common, relics (own + peer) medium, bomb & jackpot
         // rare — so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
