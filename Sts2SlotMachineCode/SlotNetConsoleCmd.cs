@@ -22,6 +22,7 @@ namespace Sts2SlotMachine;
 /// <item><c>take &lt;relicEntry&gt;</c> — peers clear that relic from their own shop (deplete) + toast the win.</item>
 /// <item><c>jackpot &lt;relicEntry&gt;</c> — announce a jackpot-relic win to the other players (toast only).</item>
 /// <item><c>stat &lt;bet&gt; &lt;goldWon&gt; &lt;relics&gt; &lt;jackpots&gt; &lt;bombs&gt;</c> — fold a spin into the party totals.</item>
+/// <item><c>spin &lt;addSteps&gt; &lt;addDurMs&gt; &lt;kind&gt; &lt;amount&gt;</c> — mirror a live spin on the sender's spectator cabinet.</item>
 /// </list>
 ///
 /// Reuses the game's BUILT-IN <c>NetConsoleCmdGameAction</c> wire type (a plain string payload), so the
@@ -86,6 +87,27 @@ public sealed class SlotNetConsoleCmd : AbstractConsoleCmd
                     && int.TryParse(args[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sBomb))
                     SlotNet.ApplyStat(issuingPlayer, sBet, sWon, sRel, sJack, sBomb);
                 return new CmdResult(success: true, "slot_sync stat");
+
+            case "spin":
+                if (args.Length >= 5
+                    && int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int spSteps)
+                    && int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int spDur)
+                    && int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int spKind)
+                    && int.TryParse(args[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int spAmt))
+                    SlotNet.ApplySpin(issuingPlayer, spSteps, spDur, spKind, spAmt);
+                return new CmdResult(success: true, "slot_sync spin");
+
+            case "skinpick":
+                if (args.Length >= 2) SlotNet.ApplySkinChoice(issuingPlayer, args[1]);
+                return new CmdResult(success: true, "slot_sync skinpick");
+
+            case "cardupg":
+                // (skin ability) free card upgrade — the PEER upgrades the same card the owner chose (by index
+                // into the synced deck order). The initiator already upgraded inline, so ApplyCardUpgrade skips it.
+                if (args.Length >= 2 &&
+                    int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int cuIdx))
+                    SlotNet.ApplyCardUpgrade(issuingPlayer, cuIdx);
+                return new CmdResult(success: true, "slot_sync cardupg");
 
             default:
                 return new CmdResult(success: true, $"slot_sync: unknown op '{op}'");

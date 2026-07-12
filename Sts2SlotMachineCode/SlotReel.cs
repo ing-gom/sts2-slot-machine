@@ -14,6 +14,7 @@ internal sealed partial class SlotReel : Control
 
     internal float ReelW = 60f, CellH = 60f, Pad = 8f;
     internal SlotMachineState State = null!;   // set before it enters the tree
+    internal Color LineColor = new(0.10f, 0.09f, 0.08f, 0.9f);   // row-separator colour (skin-tinted)
 
     private Control _strip = null!;
     private Tween? _tween;
@@ -134,7 +135,7 @@ internal sealed partial class SlotReel : Control
         while (_strip.GetChildCount() > 0) { var c = _strip.GetChild(0); _strip.RemoveChild(c); c.Free(); }
 
         float lt = Mathf.Max(1.5f, CellH * 0.03f);
-        var lineC = new Color(0.10f, 0.09f, 0.08f, 0.9f);
+        var lineC = LineColor;
         for (int i = 0; i < seq.Length; i++)
         {
             var tex = State.Icon(seq[i]);

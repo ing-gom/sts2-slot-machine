@@ -26,6 +26,10 @@ internal sealed partial class SlotToast : CanvasLayer
     internal static void ShowPoolWon(int amount)
         => Show(CoinIcon(), string.Format(SlotLoc.Ui("POOL_WON_BY_PARTNER"), amount));
 
+    /// <summary>A milestone unlocked a new cabinet skin.</summary>
+    internal static void ShowSkinUnlocked(string skinName)
+        => Show(null, string.Format(SlotLoc.Ui("SKIN_UNLOCKED"), skinName));
+
     private static void Show(Texture2D? icon, string message)
     {
         try

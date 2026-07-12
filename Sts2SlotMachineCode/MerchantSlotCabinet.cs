@@ -33,18 +33,29 @@ internal sealed partial class MerchantSlotCabinet : Control
     private bool _positioned;
     private SlotMachineState _state = null!;
     private SlotReel[] _reels = System.Array.Empty<SlotReel>();
+    private SlotWheel? _wheel;     // palette bars, for live re-skin
+    private TextureRect? _lever;   // for skin swap + rainbow tint
+    private float _hue;
+    private int _slotIndex;       // co-op: this cabinet's slot in the shared non-overlapping row
+    private int _slotCount = 1;   // total cabinets (1 = single-player → keep the original random spot)
 
     public static void Attach(NMerchantRoom room)
     {
         var cab = new MerchantSlotCabinet { _room = room };
         room.AddChild(cab);   // direct child of the room → correct screen-space positioning, occluded by higher screens
-        // Draw the cabinet BEHIND the item mat so opening the shop COVERS it (instead of hiding it). The mat
-        // (%Inventory) may be nested, so move the cabinet before the mat's top-level ancestor under the room.
+        MoveBehindMat(room, cab);
+    }
+
+    /// <summary>Move a node BEHIND the shop's item mat so opening the shop COVERS it (instead of it floating
+    /// over the shop UI). The mat (%Inventory) may be nested, so target the mat's top-level ancestor under
+    /// the room. Shared by the player cabinet and the co-op spectator cabinets.</summary>
+    internal static void MoveBehindMat(NMerchantRoom room, Node node)
+    {
         Node? anc = room.Inventory;
         while (anc != null && anc.GetParent() != null && anc.GetParent() != room)
             anc = anc.GetParent();
         if (anc != null && anc.GetParent() == room)
-            room.MoveChild(cab, anc.GetIndex());
+            room.MoveChild(node, anc.GetIndex());
     }
 
     public override void _Ready()
@@ -63,9 +74,15 @@ internal sealed partial class MerchantSlotCabinet : Control
 
         // co-op: tell the partner which relics OUR shop stocks, so their reels can win from our stock too
         // (union pool). Their reciprocal broadcast fills our reels via SlotNet.PeerShopRelicIds.
-        if (_player != null) SlotNet.BroadcastShopRelics(_player, _state.OwnShopRelicIds());
+        if (_player != null)
+        {
+            SlotNet.BroadcastShopRelics(_player, _state.OwnShopRelicIds());
+            SlotNet.BroadcastSkinChoice(_player, SkinProfile.Selected);   // teammates' spectator cabinets show our skin
+        }
 
-        Texture2D? cabTex = LoadPng("slot_machine_cabinet.png");
+        SkinProfile.Load();
+        var skin = SkinCatalog.Current;
+        Texture2D? cabTex = SlotArt.LoadPng(skin.CabinetFile) ?? LoadPng("slot_machine_cabinet.png");
         if (cabTex == null)
         {
             MainFile.Logger.Warn($"[{MainFile.ModId}] cabinet art missing; slot machine not shown.");
@@ -109,10 +126,30 @@ internal sealed partial class MerchantSlotCabinet : Control
         AddChild(_cabinet);
 
         // the real relic-icon reels inside the window (static; they spin together when the player spins)
-        _reels = SlotWindow.Build(this, _s, _state);
+        _wheel = SlotWindow.Build(this, _s, _state, skin);
+        _reels = _wheel.Reels;
 
         // static lever image (same builder as the popup → mount lands on the hub)
-        AddChild(SlotWindow.BuildLever(_s, interactive: false));
+        _lever = SlotWindow.BuildLever(_s, interactive: false, skin);
+        AddChild(_lever);
+
+        // co-op: stand up a VIEW-ONLY spectator cabinet for each teammate, so you can watch them spin (they
+        // can't be selected — only your own cabinet opens the machine). Ordered by NetId for a stable index.
+        if (SlotNet.IsCoop && _player != null)
+        {
+            var mates = SlotNet.AllPlayers()
+                         .Where(pl => pl != null && !LocalContext.IsMe(pl))
+                         .OrderBy(pl => pl.NetId)
+                         .ToList();
+            _slotCount = 1 + mates.Count;   // whole row: my cabinet + one per teammate
+            _slotIndex = 0;                 // my cabinet takes the first slot
+            for (int i = 0; i < mates.Count; i++)
+            {
+                var spec = new SpectatorCabinet(_room, mates[i], _state, slotIndex: i + 1, slotCount: _slotCount);
+                _room.AddChild(spec);
+                MoveBehindMat(_room, spec);
+            }
+        }
 
         Visible = false; // _Process decides based on whether we're on the NPC screen
     }
@@ -126,8 +163,57 @@ internal sealed partial class MerchantSlotCabinet : Control
             // the cabinet when the shop opens, and higher screens (map/settings) cover it too.
             bool inRoom = GodotObject.IsInstanceValid(_room);
             if (Visible != inRoom) Visible = inRoom;
+            AnimateSkin(delta);
         }
         catch (Exception e) { MainFile.Logger.Warn($"[{MainFile.ModId}] cabinet _Process failed: {e.Message}"); }
+    }
+
+    /// <summary>Re-skin the resting cabinet to the local player's SELECTED skin (called by the popup when the
+    /// player changes skin). Swaps the cabinet + lever textures and recolours the reel palette.</summary>
+    internal void ApplySkin()
+    {
+        if (_cabinet == null) return;
+        var skin = SkinCatalog.Current;
+        _cabinet.TextureNormal = SlotArt.LoadPng(skin.CabinetFile) ?? LoadPng("slot_machine_cabinet.png");
+        if (_lever != null) _lever.Texture = SlotArt.LoadPng(skin.LeverFile) ?? SlotArt.LoadPng("slot_machine_lever.png");
+        if (_wheel != null)
+        {
+            _wheel.Payline.Color = skin.PaylineTint;
+            foreach (var d in _wheel.Dividers) d.Color = skin.LineColor;
+            foreach (var r in _wheel.Reels) r.LineColor = skin.LineColor;
+        }
+        if (!skin.Animated || skin.AnimGlowOnly) { _cabinet.Modulate = Colors.White; if (_lever != null) _lever.Modulate = Colors.White; }
+    }
+
+    private void AnimateSkin(double delta)
+    {
+        var skin = SkinCatalog.Current;
+        if (!skin.Animated || _wheel == null) return;
+        _hue = (_hue + (float)delta * 0.15f) % 1f;
+        _wheel.Payline.Color = Color.FromHsv(_hue, 0.55f, 1f, 0.20f);
+        var line = Color.FromHsv(_hue, 0.5f, 0.95f, 0.55f);
+        foreach (var d in _wheel.Dividers) d.Color = line;
+        foreach (var r in _wheel.Reels) r.LineColor = line;
+        if (skin.AnimGlowOnly) return;
+        var tint = Color.FromHsv(_hue, 0.45f, 1f);
+        if (_cabinet != null) _cabinet.Modulate = tint;
+        if (_lever != null) _lever.Modulate = tint;
+    }
+
+    /// <summary>Shared non-overlapping layout for the co-op cabinet row (my cabinet + spectators). Lays
+    /// <paramref name="count"/> cabinets in a centred row on a common floor line, fixed cell width so they
+    /// never overlap; each cabinet is bottom-aligned + centred within its cell. Clamped to the viewport.</summary>
+    internal static Vector2 SlotRowSlot(Rect2 view, int index, int count, Vector2 size)
+    {
+        const float cell = 165f;   // > any cabinet width → guaranteed clearance between neighbours
+        float rowW = count * cell;
+        float startX = Math.Max(8f, view.Size.X * 0.5f - rowW * 0.5f);
+        float floorY = view.Size.Y * 0.70f;
+        float x = startX + index * cell + (cell - size.X) * 0.5f;
+        float y = floorY - size.Y;
+        x = Math.Clamp(x, 8f, Math.Max(8f, view.Size.X - size.X - 8f));
+        y = Math.Clamp(y, 40f, Math.Max(40f, view.Size.Y - size.Y - 8f));
+        return new Vector2(x, y);
     }
 
     private void PlaceAtSpawn()
@@ -135,7 +221,14 @@ internal sealed partial class MerchantSlotCabinet : Control
         Rect2 view = GetViewport().GetVisibleRect();
         if (view.Size.X < 2f) return;   // viewport not ready yet
 
-        // Spawn randomly in the gap BETWEEN the merchant NPC and screen centre (the player's side).
+        if (_slotCount > 1)   // co-op: deterministic non-overlapping row (shared with the spectator cabinets)
+        {
+            Position = SlotRowSlot(view, _slotIndex, _slotCount, Size);
+            _positioned = true;
+            return;
+        }
+
+        // single-player: keep the original random spot in the gap BETWEEN the merchant NPC and screen centre.
         Vector2 c;
         var ch = FindCharacter(GetTree().Root);
         if (ch != null && GodotObject.IsInstanceValid(ch))

@@ -30,5 +30,15 @@
         <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_explosion.png"
               DestinationFolder="$(Sts2ModOutputDir)"
               Condition="Exists('$(MSBuildProjectDirectory)/slot_explosion.png') And !Exists('$(Sts2ModOutputDir)/slot_explosion.png')" />
+        <Copy SourceFiles="$(MSBuildProjectDirectory)/slot_cardremove.png"
+              DestinationFolder="$(Sts2ModOutputDir)"
+              Condition="Exists('$(MSBuildProjectDirectory)/slot_cardremove.png') And !Exists('$(Sts2ModOutputDir)/slot_cardremove.png')" />
+        <!-- cabinet skins (cabinet_*.png + lever_*.png) → mods/<id>/skins/ -->
+        <ItemGroup>
+            <SkinArt Include="$(MSBuildProjectDirectory)/skins/*.png" />
+        </ItemGroup>
+        <Copy SourceFiles="@(SkinArt)"
+              DestinationFolder="$(Sts2ModOutputDir)/skins"
+              Condition="!Exists('$(Sts2ModOutputDir)/skins/%(Filename)%(Extension)')" />
     </Target>
 </Project>

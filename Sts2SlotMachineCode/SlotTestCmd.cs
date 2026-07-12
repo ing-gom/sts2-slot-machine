@@ -21,11 +21,11 @@ namespace Sts2SlotMachine;
 /// </summary>
 public class SlotTestCmd : AbstractConsoleCmd
 {
-    private static readonly string[] Outcomes = { "relic", "jackpot", "pool", "1", "2", "3", "full", "bomb", "lose" };
-    private static readonly string[] Completions = { "relic", "jackpot", "pool", "1", "2", "3", "full", "bomb", "lose", "courier" };
+    private static readonly string[] Outcomes = { "relic", "potion", "cardremove", "cardupgrade", "potiongrant", "jackpot", "pool", "1", "2", "3", "full", "bomb", "lose" };
+    private static readonly string[] Completions = { "relic", "potion", "cardremove", "cardupgrade", "potiongrant", "jackpot", "pool", "1", "2", "3", "full", "bomb", "lose", "courier", "skins", "skin" };
 
     public override string CmdName => "slot";
-    public override string Args => "[relic|jackpot|pool|1|2|3|full|bomb|lose|courier]";
+    public override string Args => "[relic|cardremove|cardupgrade|potiongrant|jackpot|pool|1|2|3|full|bomb|lose|courier]";
     public override string Description => "Open the shop slot machine (test). Arg forces the next spin's outcome; 'courier' grants TheCourier (shop refills) to test reel refill.";
     public override bool IsNetworked => false;
     public override bool DebugOnly => false;
@@ -34,6 +34,28 @@ public class SlotTestCmd : AbstractConsoleCmd
     {
         if (issuingPlayer == null)
             return new CmdResult(success: false, "No active player — start a run first.");
+
+        // test helper: unlock every cabinet skin so all can be previewed without grinding milestones.
+        if (args.Length >= 1 && args[0].Equals("skins", StringComparison.OrdinalIgnoreCase))
+        {
+            SkinProfile.Load();
+            foreach (var s in SkinCatalog.All) SkinProfile.Unlocked.Add(s.Id);
+            SkinProfile.Save();
+            return new CmdResult(success: true, $"Unlocked all {SkinCatalog.All.Length} skins — open the machine and use the skin bar.");
+        }
+
+        // test helper: unlock ONE skin by id (the one you're hovering in the grid).
+        if (args.Length >= 1 && args[0].Equals("skin", StringComparison.OrdinalIgnoreCase))
+        {
+            SkinProfile.Load();
+            if (args.Length < 2)
+                return new CmdResult(success: false, $"Usage: slot skin <{string.Join("|", SkinCatalog.All.Select(s => s.Id))}>");
+            var skin = SkinCatalog.All.FirstOrDefault(x => x.Id.Equals(args[1], StringComparison.OrdinalIgnoreCase));
+            if (skin == null) return new CmdResult(success: false, $"Unknown skin '{args[1]}'.");
+            SkinProfile.Unlocked.Add(skin.Id);
+            SkinProfile.Save();
+            return new CmdResult(success: true, $"Unlocked skin '{skin.Id}'.");
+        }
 
         // test helper: grant TheCourier (the shop then REFILLS instead of depleting) so the reel-refill path can be checked.
         if (args.Length >= 1 && args[0].Equals("courier", StringComparison.OrdinalIgnoreCase))

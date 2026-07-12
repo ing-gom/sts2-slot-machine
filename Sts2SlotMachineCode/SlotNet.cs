@@ -77,6 +77,26 @@ internal static class SlotNet
     internal static void SyncRelicObtained(RelicModel relic)
         => SyncReward(() => RunManager.Instance.RewardSynchronizer.SyncLocalObtainedRelic(relic));
 
+    /// <summary>Mirror a locally-granted potion onto the peer (peer re-procures the SAME model — no re-roll).</summary>
+    internal static void SyncPotionObtained(PotionModel potion)
+        => SyncReward(() => RunManager.Instance.RewardSynchronizer.SyncLocalObtainedPotion(potion));
+
+    /// <summary>(skin ability) Card upgrade: co-op only. The owner already upgraded card <paramref name="index"/>
+    /// (among its upgradables) inline; broadcast that index so the PEER upgrades the same card (deck order is
+    /// synced). No-op in single-player.</summary>
+    internal static void DispatchCardUpgrade(Player owner, int index)
+    {
+        if (IsCoop && index >= 0) Dispatch(owner, $"cardupg {index}");
+    }
+
+    /// <summary>Handler (every client): the peer upgrades the owner's chosen card. Skips the initiator — it
+    /// already upgraded inline (with the preview VFX).</summary>
+    internal static void ApplyCardUpgrade(Player owner, int index)
+    {
+        if (LocalContext.IsMe(owner)) return;
+        SlotSpecials.UpgradeCardAt(owner, index);
+    }
+
     /// <summary>Every player currently in the run (both co-op players, or just the local one in SP).</summary>
     internal static IEnumerable<Player> AllPlayers()
         => RunManager.Instance?.State?.Players ?? Enumerable.Empty<Player>();
@@ -255,6 +275,54 @@ internal static class SlotNet
     /// <summary>Handler (every client): fold a spin (a peer's, or our own echo) into that player's total.</summary>
     internal static void ApplyStat(Player player, int bet, int goldWon, int relics, int jackpots, int bombs)
         => SlotStats.RecordParty(player, bet, goldWon, relics, jackpots, bombs);
+
+    // ---- spectate: watch a teammate's live spin on their cabinet ----
+
+    /// <summary>Fires when a teammate STARTS a spin, so their spectator cabinet in our shop can animate it:
+    /// (player, addSteps, addDurMs, kind, amount). kind: 0 lose / 1 gold / 2 relic / 3 jackpot / 4 bomb /
+    /// 5 pool. amount = gold for gold/pool/jackpot outcomes.</summary>
+    internal static event Action<Player, int, int, int, int>? SpinObserved;
+
+    /// <summary>Broadcast a just-started spin (outcome known — it's predetermined) so every OTHER client can
+    /// mirror it on that player's spectator cabinet, landing on the real result. Co-op only.</summary>
+    internal static void BroadcastSpin(Player player, int addSteps, int addDurMs, int kind, int amount)
+    {
+        if (!IsCoop) return;
+        Dispatch(player, $"spin {addSteps} {addDurMs} {kind} {amount}");
+    }
+
+    /// <summary>Handler (every client): a player spun → raise <see cref="SpinObserved"/> so their spectator
+    /// cabinet animates. Skipped for the spinner's own client (they watch their own machine directly).</summary>
+    internal static void ApplySpin(Player player, int addSteps, int addDurMs, int kind, int amount)
+    {
+        if (LocalContext.IsMe(player)) return;
+        try { SpinObserved?.Invoke(player, addSteps, addDurMs, kind, amount); } catch { }
+    }
+
+    // ---- co-op: each player's selected cabinet skin (for the spectator visual) ----
+
+    private static readonly Dictionary<Player, string> _peerSkins = new();
+
+    /// <summary>Fires when a player's skin choice arrives, so their spectator cabinet can re-skin.</summary>
+    internal static event Action<Player>? SkinChoiceChanged;
+
+    /// <summary>The skin id a player has on their cabinet (default "classic" until they broadcast one).</summary>
+    internal static string PeerSkin(Player p) => p != null && _peerSkins.TryGetValue(p, out var id) ? id : "classic";
+
+    /// <summary>Tell teammates which cabinet skin we're using (on shop open + whenever we switch).</summary>
+    internal static void BroadcastSkinChoice(Player me, string skinId)
+    {
+        if (!IsCoop || string.IsNullOrEmpty(skinId)) return;
+        Dispatch(me, $"skinpick {skinId}");
+    }
+
+    /// <summary>Handler (every client): remember a player's skin + notify their spectator cabinet to re-skin.</summary>
+    internal static void ApplySkinChoice(Player player, string skinId)
+    {
+        if (player == null || string.IsNullOrEmpty(skinId)) return;
+        _peerSkins[player] = skinId;
+        try { SkinChoiceChanged?.Invoke(player); } catch { }
+    }
 
     /// <summary>Remove a relic id from every cached peer shop list (a won/depleted relic leaves the union
     /// reel pool) and notify any open machine to rebuild its reels + paytable. Runs on all clients so the

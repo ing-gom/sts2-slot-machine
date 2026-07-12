@@ -22,7 +22,12 @@ internal sealed class SlotSymbol
     internal bool IsBomb;
     internal bool IsPool;                    // co-op: the "prize pot" symbol — a middle-row triple wins the shared pot
     internal bool IsJackpot;                 // the special jackpot relic (SignetRing); granted via RelicCmd.Obtain
+    internal bool IsPotion;                  // (skin ability) a shop POTION — winnable at ~2× the relic rate
+    internal bool IsCardRemove;              // (skin ability) win a free (extra) card removal
+    internal bool IsCardUpgrade;             // (skin ability) win a free card upgrade (smith)
+    internal bool IsPotionGrant;             // (skin ability) win a free RANDOM potion
     internal MerchantRelicEntry? ShopEntry;  // used to grant a shop relic for free
+    internal MerchantPotionEntry? PotionEntry; // used to grant a shop potion for free (same purchase path)
     internal Texture2D? Icon;
 
     /// <summary>Any relic the middle-row triple can award (own shop, partner's shop, or the jackpot).</summary>
@@ -68,33 +73,66 @@ internal sealed class SlotMachineState
     private const int PLine2 = 44;   // 4.4%  → 2-line gold
     private const int PLine3 = 16;   // 1.6%  → 3-line gold
     private const int PFull  = 2;    // 0.2%  → full grid gold
-    private const int PBomb  = 10;   // 1.0%  → all rewards void (RTP unchanged: freed % just becomes a plain miss)
+    private const int PBomb  = 50;   // 5.0%  → all rewards void (symmetric with the 5% relic upside; a real gamble baseline)
     private const int PJackpot = 2;  // 0.2%  → jackpot relic (SignetRing, self-pays 999g) — kept rare so RTP stays sane
     internal const int JackpotSelfPayGold = 999;   // the SignetRing's self-grant — counted into the winnings stat
     private const int PPool = 30;    // 3.0%  → win the shared co-op pool (the whole accumulated pot; see SlotNet)
 
     // A relic outcome is available if EITHER shop (own or the co-op partner's) has a winnable relic.
     private bool HasWinnableRelic => _relicIdx.Count > 0;
+    // Potions: a SKIN ability — the shop's potions become winnable at ~2× the relic rate (its own bucket).
+    private const int PPotion = 2 * PRelic;   // 10.0%
+    internal bool PotionsActive => _potionIdx.Count > 0 && SkinCatalog.Current.PotionsOnReels;
+    // Card removal: a SKIN ability — a payline triple wins a free (extra) card removal.
+    private const int PCardRemove = 30;   // 3.0%
+    internal bool CardRemoveActive => _cardRemoveIdx >= 0;
+    internal double PctCardRemove => CardRemoveActive ? PCardRemove / 10.0 : 0.0;
+    // Card upgrade (smith): a SKIN ability — a payline triple upgrades a random card.
+    private const int PCardUpgrade = 30;   // 3.0%
+    internal bool CardUpgradeActive => _cardUpgradeIdx >= 0;
+    internal double PctCardUpgrade => CardUpgradeActive ? PCardUpgrade / 10.0 : 0.0;
+    // Potion vending: a SKIN ability — a payline triple grants a free RANDOM potion.
+    private const int PPotionGrant = 100;   // 10.0%
+    internal bool PotionGrantActive => _potionGrantIdx >= 0;
+    internal double PctPotionGrant => PotionGrantActive ? PPotionGrant / 10.0 : 0.0;
     // The shared prize pot is a CO-OP-only feature (no partner → no shared pot, no pool outcome).
     internal bool PoolActive => SlotNet.IsCoop;
-    internal double PctRelic => HasWinnableRelic ? PRelic / 10.0 : 0.0;
-    internal double PctLine(int n) => (n == 1 ? PLine1 : n == 2 ? PLine2 : n == 3 ? PLine3 : 0) / 10.0;
-    internal double PctFull => PFull / 10.0;
-    internal double PctBomb => PBomb / 10.0;
+    // Effective per-mille after the skin's DRAMATIC multipliers + deltas (drives both Spin and the paytable).
+    private static int RndMul(int v, float m) => System.Math.Max(0, (int)System.Math.Round(v * m));
+    private int EffRelic => System.Math.Max(0, RndMul(PRelic, SkinCatalog.Current.RelicMult) + SkinCatalog.Current.RelicDelta);
+    private int EffBomb => System.Math.Max(0, RndMul(PBomb, SkinCatalog.Current.BombMult) + SkinCatalog.Current.BombDelta);
+    private int EffLine(int n) => RndMul(n == 1 ? PLine1 : n == 2 ? PLine2 : n == 3 ? PLine3 : 0, SkinCatalog.Current.LineMult);
+    private int EffFull => RndMul(PFull, SkinCatalog.Current.FullMult);
+
+    internal double PctRelic => HasWinnableRelic ? EffRelic / 10.0 : 0.0;
+    internal double RelicDeltaPct => (EffRelic - PRelic) / 10.0;   // change vs vanilla, for the paytable "(+x%)"
+    internal double PctPotion => PotionsActive ? PPotion / 10.0 : 0.0;
+    internal double PctLine(int n) => EffLine(n) / 10.0;
+    internal double LineDeltaPct(int n) => (EffLine(n) - (n == 1 ? PLine1 : n == 2 ? PLine2 : n == 3 ? PLine3 : 0)) / 10.0;
+    internal double PctFull => EffFull / 10.0;
+    internal double FullDeltaPct => (EffFull - PFull) / 10.0;
+    internal double PctBomb => EffBomb / 10.0;
+    internal double BombDeltaPct => (EffBomb - PBomb) / 10.0;
     internal double PctJackpot => _jackpotIdx >= 0 ? PJackpot / 10.0 : 0.0;
     internal double PctPool => PoolActive ? PPool / 10.0 : 0.0;
-    internal double PctLose => (1000 - (HasWinnableRelic ? PRelic : 0) - PLine1 - PLine2 - PLine3 - PFull - PBomb
+    internal double PctLose => System.Math.Max(0, 1000 - (HasWinnableRelic ? EffRelic : 0) - (PotionsActive ? PPotion : 0) - (CardRemoveActive ? PCardRemove : 0)
+                               - (CardUpgradeActive ? PCardUpgrade : 0) - (PotionGrantActive ? PPotionGrant : 0)
+                               - EffLine(1) - EffLine(2) - EffLine(3) - EffFull - EffBomb
                                - (_jackpotIdx >= 0 ? PJackpot : 0) - (PoolActive ? PPool : 0)) / 10.0;
 
     internal readonly List<SlotSymbol> Symbols = new();
     private readonly List<int> _shopIdx = new();      // own shop relics (granted free via OnTryPurchaseWrapper)
     private readonly List<int> _peerShopIdx = new();  // co-op: partner's shop relics (granted via Obtain + deplete)
     private readonly List<int> _relicIdx = new();     // union of the two above — every winnable middle-row relic
+    private readonly List<int> _potionIdx = new();    // (skin ability) winnable shop potions
     private readonly List<int> _fillerIdx = new();
     private readonly List<int> _stripPool = new();   // weighted symbol bag for MANUAL free-spin reels (bomb rare)
     private int _bombIdx = -1;
     private int _jackpotIdx = -1;
     private int _poolIdx = -1;
+    private int _cardRemoveIdx = -1;
+    private int _cardUpgradeIdx = -1;
+    private int _potionGrantIdx = -1;
     private readonly System.Random _rng = new();
     private NMerchantInventory? _shop;
     private Player? _player;         // to check whether the (1-time) jackpot relic is already owned
@@ -102,6 +140,9 @@ internal sealed class SlotMachineState
     private SlotSymbol? _bomb;
     private SlotSymbol? _jackpot;   // SignetRing — the Ancient relic that self-grants 999 gold on obtain
     private SlotSymbol? _pool;      // co-op "prize pot" symbol — a middle-row triple wins the shared pot
+    private SlotSymbol? _cardRemove; // (skin ability) card-removal symbol
+    private SlotSymbol? _cardUpgrade; // (skin ability) card-upgrade (smith) symbol
+    private SlotSymbol? _potionGrant; // (skin ability) free-random-potion symbol
 
     internal int Count => Symbols.Count;
     internal Texture2D? Icon(int i) => (i >= 0 && i < Symbols.Count) ? Symbols[i].Icon : null;
@@ -118,6 +159,12 @@ internal sealed class SlotMachineState
         // generic gold coin if the shop's price coin can't be read.
         var coin = ShopCostCoin(shop);
         if (coin != null) st._pool = new SlotSymbol { Id = "POOL", IsPool = true, Icon = coin };
+        var crIcon = SlotArt.LoadPng("slot_cardremove.png");
+        if (crIcon != null) st._cardRemove = new SlotSymbol { Id = "CARDREMOVE", IsCardRemove = true, Icon = crIcon };
+        var cuIcon = SlotArt.LoadPng("slot_cardupgrade.png");
+        if (cuIcon != null) st._cardUpgrade = new SlotSymbol { Id = "CARDUPGRADE", IsCardUpgrade = true, Icon = cuIcon };
+        var pgIcon = SlotArt.LoadPng("slot_potiongrant.png");
+        if (pgIcon != null) st._potionGrant = new SlotSymbol { Id = "POTIONGRANT", IsPotionGrant = true, Icon = pgIcon };
         // Jackpot symbol = SignetRing (Ancient relic that self-grants 999 gold on obtain). Its own icon is
         // the reel symbol, so hitting it on the payline literally wins "the 999 relic".
         try
@@ -219,6 +266,7 @@ internal sealed class SlotMachineState
         _shopIdx.Clear();
         _peerShopIdx.Clear();
         _relicIdx.Clear();
+        _potionIdx.Clear();
         _fillerIdx.Clear();
 
         var ownIds = new HashSet<string>();
@@ -257,6 +305,26 @@ internal sealed class SlotMachineState
         _relicIdx.AddRange(_shopIdx);
         _relicIdx.AddRange(_peerShopIdx);
 
+        // (skin ability) the shop's own POTIONS become winnable symbols — separate bucket at ~2× relic rate.
+        if (SkinCatalog.Current.PotionsOnReels)
+        {
+            try
+            {
+                var potions = _shop?.Inventory?.PotionEntries;
+                if (potions != null)
+                    foreach (var pe in potions)
+                        if (pe?.Model != null)
+                        {
+                            Texture2D? icon = null;
+                            try { icon = pe.Model.Image; } catch { }
+                            if (icon == null) continue;
+                            _potionIdx.Add(Symbols.Count);
+                            Symbols.Add(new SlotSymbol { Id = pe.Model.Id.Entry, IsPotion = true, PotionEntry = pe, Icon = icon });
+                        }
+            }
+            catch (Exception ex) { MainFile.Logger.Warn($"[{MainFile.ModId}] read shop potions failed: {ex.Message}"); }
+        }
+
         foreach (var f in _fillers) { _fillerIdx.Add(Symbols.Count); Symbols.Add(f); }
         if (_bomb != null) { _bombIdx = Symbols.Count; Symbols.Add(_bomb); }
         // Jackpot relic is ONE-TIME (now PARTY-WIDE): once ANY player owns it, drop the symbol entirely (a
@@ -270,13 +338,27 @@ internal sealed class SlotMachineState
         _poolIdx = -1;
         if (_pool != null && PoolActive) { _poolIdx = Symbols.Count; Symbols.Add(_pool); }
 
+        // (skin ability) card-removal symbol — only in the pool when the equipped skin grants it.
+        _cardRemoveIdx = -1;
+        if (_cardRemove != null && SkinCatalog.Current.CardRemoval) { _cardRemoveIdx = Symbols.Count; Symbols.Add(_cardRemove); }
+        // (skin ability) card-upgrade (smith) symbol.
+        _cardUpgradeIdx = -1;
+        if (_cardUpgrade != null && SkinCatalog.Current.CardUpgrade) { _cardUpgradeIdx = Symbols.Count; Symbols.Add(_cardUpgrade); }
+        // (skin ability) free-random-potion symbol.
+        _potionGrantIdx = -1;
+        if (_potionGrant != null && SkinCatalog.Current.PotionVending) { _potionGrantIdx = Symbols.Count; Symbols.Add(_potionGrant); }
+
         // Weighted bag for manual free-spin reels: fillers common, relics (own + peer) medium, bomb & jackpot
         // rare — so a manually-stopped bomb (payline voids) or jackpot triple lands seldom.
         _stripPool.Clear();
         foreach (var s in _relicIdx)  for (int k = 0; k < 3; k++) _stripPool.Add(s);   // shop + peer relic weight 3
+        foreach (var s in _potionIdx) for (int k = 0; k < 4; k++) _stripPool.Add(s);   // potion weight 4 (~2× relic)
         foreach (var f in _fillerIdx) for (int k = 0; k < 4; k++) _stripPool.Add(f);   // filler weight 4
         if (_bombIdx >= 0) _stripPool.Add(_bombIdx);                                    // bomb weight 1
         if (_jackpotIdx >= 0) _stripPool.Add(_jackpotIdx);                              // jackpot weight 1 (rare)
+        if (_cardRemoveIdx >= 0) for (int k = 0; k < 2; k++) _stripPool.Add(_cardRemoveIdx);   // card-removal weight 2
+        if (_cardUpgradeIdx >= 0) for (int k = 0; k < 2; k++) _stripPool.Add(_cardUpgradeIdx);  // card-upgrade weight 2
+        if (_potionGrantIdx >= 0) for (int k = 0; k < 2; k++) _stripPool.Add(_potionGrantIdx);  // potion-grant weight 2
     }
 
     /// <summary>The ids of the relics on sale in THIS player's shop — broadcast to the co-op partner so
@@ -322,9 +404,9 @@ internal sealed class SlotMachineState
         {
             res.Grants.Add(Symbols[_jackpotIdx]); res.Bingos = 1; res.Gold = 0; return res;   // JACKPOT relic
         }
-        if (midTriple && (Symbols[mid].IsShop || Symbols[mid].IsPeerShop))
+        if (midTriple && (Symbols[mid].IsShop || Symbols[mid].IsPeerShop || Symbols[mid].IsPotion || Symbols[mid].IsCardRemove))
         {
-            res.Grants.Add(Symbols[mid]); res.Bingos = 1; res.Gold = 0; return res;   // middle relic triple → relic
+            res.Grants.Add(Symbols[mid]); res.Bingos = 1; res.Gold = 0; return res;   // middle relic/potion/card-removal triple → win it
         }
 
         int n = 0;
@@ -340,7 +422,9 @@ internal sealed class SlotMachineState
 
     // ---- the spin: draw an outcome, then build a matching grid ----
 
-    /// <summary>Debug: force the NEXT spin's outcome ("relic"/"1"/"2"/"3"/"full"/"bomb"/"lose"). Cleared after use.</summary>
+    /// <summary>Debug: force the NEXT spin's outcome ("relic"/"potion"/"cardremove"/"cardupgrade"/"potiongrant"/
+    /// "1"/"2"/"3"/"full"/"bomb"/"jackpot"/"pool"/"lose"). The special-ability outcomes only fire when that skin
+    /// is equipped (else fall back to a miss). Cleared after use.</summary>
     internal string? Forced;
 
     internal SpinResult Spin()
@@ -354,6 +438,10 @@ internal sealed class SlotMachineState
             switch (f.ToLowerInvariant())
             {
                 case "relic": if (HasWinnableRelic) BuildRelic(res); else BuildLose(res); break;
+                case "potion": if (_potionIdx.Count > 0) BuildPotion(res); else BuildLose(res); break;
+                case "cardremove": if (_cardRemoveIdx >= 0) BuildCardRemove(res); else BuildLose(res); break;
+                case "cardupgrade": if (_cardUpgradeIdx >= 0) BuildCardUpgrade(res); else BuildLose(res); break;
+                case "potiongrant": if (_potionGrantIdx >= 0) BuildPotionGrant(res); else BuildLose(res); break;
                 case "1": BuildLines(res, 1); break;
                 case "2": BuildLines(res, 2); break;
                 case "3": BuildLines(res, 3); break;
@@ -366,14 +454,20 @@ internal sealed class SlotMachineState
             return res;
         }
 
+        // the local player's SKIN can DRAMATICALLY reshape the odds via multipliers (Eff* apply mults+deltas;
+        // per-player — Spin only runs for our own play). Lost probability spills into "lose" naturally.
         int r = _rng.Next(1000);
         int cum = 0;
-        if (HasWinnableRelic && r < (cum += PRelic)) BuildRelic(res);
-        else if (r < (cum += PLine1)) BuildLines(res, 1);
-        else if (r < (cum += PLine2)) BuildLines(res, 2);
-        else if (r < (cum += PLine3)) BuildLines(res, 3);
-        else if (r < (cum += PFull)) BuildFull(res);
-        else if (r < (cum += PBomb)) BuildBomb(res);
+        if (HasWinnableRelic && r < (cum += EffRelic)) BuildRelic(res);
+        else if (PotionsActive && r < (cum += PPotion)) BuildPotion(res);   // skin ability: potion win (~2× relic)
+        else if (CardRemoveActive && r < (cum += PCardRemove)) BuildCardRemove(res);   // skin ability: free card removal
+        else if (CardUpgradeActive && r < (cum += PCardUpgrade)) BuildCardUpgrade(res);   // skin ability: free card upgrade
+        else if (PotionGrantActive && r < (cum += PPotionGrant)) BuildPotionGrant(res);   // skin ability: free random potion
+        else if (r < (cum += EffLine(1))) BuildLines(res, 1);
+        else if (r < (cum += EffLine(2))) BuildLines(res, 2);
+        else if (r < (cum += EffLine(3))) BuildLines(res, 3);
+        else if (r < (cum += EffFull)) BuildFull(res);
+        else if (r < (cum += EffBomb)) BuildBomb(res);
         else if (_jackpotIdx >= 0 && r < (cum += PJackpot)) BuildJackpot(res);
         else if (PoolActive && r < (cum += PPool)) BuildPool(res);   // co-op only
         else BuildLose(res);
@@ -505,6 +599,63 @@ internal sealed class SlotMachineState
         }
         res.Grants.Add(Symbols[relic]);
         res.Bingos = 1; res.Gold = 0;   // a relic win pays NO gold
+    }
+
+    private void BuildPotion(SpinResult res)
+    {
+        if (_potionIdx.Count == 0) { BuildLose(res); return; }
+        int p = _potionIdx[_rng.Next(_potionIdx.Count)];
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            FillLoseRow(res.Grid, 0);
+            FillLoseRow(res.Grid, 2);
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = p;   // middle row = potion triple
+            if (CountBingos(res.Grid) == 1) break;
+        }
+        res.Grants.Add(Symbols[p]);
+        res.Bingos = 1; res.Gold = 0;
+    }
+
+    private void BuildCardRemove(SpinResult res)
+    {
+        if (_cardRemoveIdx < 0) { BuildLose(res); return; }
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            FillLoseRow(res.Grid, 0);
+            FillLoseRow(res.Grid, 2);
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = _cardRemoveIdx;   // middle row = card-removal triple
+            if (CountBingos(res.Grid) == 1) break;
+        }
+        res.Grants.Add(Symbols[_cardRemoveIdx]);
+        res.Bingos = 1; res.Gold = 0;
+    }
+
+    private void BuildCardUpgrade(SpinResult res)
+    {
+        if (_cardUpgradeIdx < 0) { BuildLose(res); return; }
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            FillLoseRow(res.Grid, 0);
+            FillLoseRow(res.Grid, 2);
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = _cardUpgradeIdx;   // middle row = card-upgrade triple
+            if (CountBingos(res.Grid) == 1) break;
+        }
+        res.Grants.Add(Symbols[_cardUpgradeIdx]);
+        res.Bingos = 1; res.Gold = 0;
+    }
+
+    private void BuildPotionGrant(SpinResult res)
+    {
+        if (_potionGrantIdx < 0) { BuildLose(res); return; }
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            FillLoseRow(res.Grid, 0);
+            FillLoseRow(res.Grid, 2);
+            for (int c = 0; c < 3; c++) res.Grid[c, 1] = _potionGrantIdx;   // middle row = potion-grant triple
+            if (CountBingos(res.Grid) == 1) break;
+        }
+        res.Grants.Add(Symbols[_potionGrantIdx]);
+        res.Bingos = 1; res.Gold = 0;
     }
 
     private void BuildPool(SpinResult res)
