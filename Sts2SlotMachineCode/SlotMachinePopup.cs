@@ -1,9 +1,12 @@
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Godot;
 using MegaCrit.Sts2.addons.mega_text;          // MegaLabel (shop price label)
 using MegaCrit.Sts2.Core.Commands;             // PlayerCmd.LoseGold / GainGold
+using MegaCrit.Sts2.Core.Context;              // LocalContext.IsMe (mark your own ranking row)
 using MegaCrit.Sts2.Core.Entities.Gold;        // GoldLossType
+using MegaCrit.Sts2.Core.Platform;             // PlatformUtil.GetPlayerName (real Steam name for the ranking)
 using MegaCrit.Sts2.Core.Entities.Players;     // Player
 using MegaCrit.Sts2.Core.Helpers;              // StsColors
 using MegaCrit.Sts2.Core.Localization.Fonts;   // FontControlUtils, FontType (game/locale font)
@@ -58,6 +61,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     private Control? _poolCost;       // shared prize-pot total, cloned shop price widget (co-op only)
     private Label? _poolValueLabel;   // fallback if the shop price widget can't be cloned
     private VBoxContainer _paytableHost = null!;
+    private VBoxContainer? _statsHost;   // right-side record panel (personal + co-op party)
 
     // --- manual-stop mode ---
     private Button? _stopButton;
@@ -185,6 +189,12 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         row.MoveChild(_paytableHost, 0);   // draw it to the LEFT of the machine
         RebuildPaytable();
 
+        // run-record panel on the RIGHT (personal + co-op party totals) — appended last → rightmost
+        _statsHost = new VBoxContainer();
+        _statsHost.AddThemeConstantOverride("separation", 6);
+        row.AddChild(_statsHost);
+        RebuildStats();
+
         BuildBackButton();   // reuse the shop's real back button (top-left), falling back to a lookalike
 
         _shopCoinTex = ExtractShopCoin();   // the shop's own coin sprite (matches the bet/gold display)
@@ -194,6 +204,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         _player.GoldChanged += UpdateInfo;
         SlotNet.PoolChanged += UpdatePool;
         SlotNet.ShopListChanged += OnPeerShopChanged;   // a peer's stock changed (e.g. a won relic depleted) → rebuild
+        SlotStats.Changed += RebuildStats;              // a spin resolved → refresh the record panel
         UpdateInfo();
 
         // co-op: (re)broadcast our shop's relic ids so the partner's reels can win from our stock (union pool)
@@ -207,6 +218,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         if (_player != null) _player.GoldChanged -= UpdateInfo;
         SlotNet.PoolChanged -= UpdatePool;
         SlotNet.ShopListChanged -= OnPeerShopChanged;
+        SlotStats.Changed -= RebuildStats;
         if (ReferenceEquals(_open, this)) _open = null;
     }
 
@@ -298,6 +310,76 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
     }
 
     private static string FmtPct(double p) => p.ToString("0.#");
+
+    /// <summary>Refresh the right-side record panel: the local player's detailed totals, plus (co-op) two
+    /// per-player rankings — by gold spent and by gold won. Fires on every spin (SlotStats.Changed) + on open.</summary>
+    private void RebuildStats()
+    {
+        if (_closed || _statsHost == null) return;
+        foreach (var c in _statsHost.GetChildren()) c.QueueFree();
+
+        // top spacer so the panel lines up with the reel WINDOW (same as the paytable)
+        _statsHost.AddChild(new Control { CustomMinimumSize = new Vector2(0, SlotWindow.WinY0 * _f) });
+
+        AddPersonalBlock(SlotStats.Personal);
+        if (SlotNet.IsCoop)
+        {
+            AddRankBlock(SlotLoc.Ui("STATS_RANK_BET"), a => a.GoldBet);
+            AddRankBlock(SlotLoc.Ui("STATS_RANK_WON"), a => a.GoldWon);
+        }
+    }
+
+    /// <summary>The local player's own detailed totals — spent, won, net (colour), best win, counts.</summary>
+    private void AddPersonalBlock(SlotStats.Accum a)
+    {
+        if (_statsHost == null) return;
+        _statsHost.AddChild(MakeLabel(SlotLoc.Ui("STATS_ME"), 24, HorizontalAlignment.Left));
+        _statsHost.AddChild(MakeLabel(string.Format(SlotLoc.Ui("STAT_BET"), a.GoldBet), 18, HorizontalAlignment.Left));
+        _statsHost.AddChild(MakeLabel(string.Format(SlotLoc.Ui("STAT_WON"), a.GoldWon), 18, HorizontalAlignment.Left));
+
+        string net = (a.Net >= 0 ? "+" : "") + a.Net;   // a negative net already carries its '-'
+        var netLabel = MakeLabel(string.Format(SlotLoc.Ui("STAT_NET"), net), 18, HorizontalAlignment.Left);
+        netLabel.AddThemeColorOverride("font_color", a.Net >= 0 ? new Color(0.55f, 0.9f, 0.55f) : StsColors.red);
+        _statsHost.AddChild(netLabel);
+
+        _statsHost.AddChild(MakeLabel(string.Format(SlotLoc.Ui("STAT_BIGGEST"), a.BiggestWin), 18, HorizontalAlignment.Left));
+        _statsHost.AddChild(MakeLabel(string.Format(SlotLoc.Ui("STAT_COUNTS"), a.Relics, a.Jackpots, a.Bombs), 18, HorizontalAlignment.Left));
+    }
+
+    /// <summary>A co-op ranking of all players by a chosen metric (gold spent / gold won), highest first.</summary>
+    private void AddRankBlock(string title, Func<SlotStats.Accum, int> metric)
+    {
+        if (_statsHost == null) return;
+        _statsHost.AddChild(new Control { CustomMinimumSize = new Vector2(0, 10) });
+        _statsHost.AddChild(MakeLabel(title, 22, HorizontalAlignment.Left));
+
+        int rank = 1;
+        foreach (var kv in SlotStats.ByPlayer.OrderByDescending(kv => metric(kv.Value)).Take(4))   // co-op is up to 4 players
+        {
+            string row = string.Format(SlotLoc.Ui("RANK_ROW"), rank, PlayerName(kv.Key), metric(kv.Value));
+            bool me = false;
+            try { me = LocalContext.IsMe(kv.Key); } catch { }
+            if (me) row += "  " + SlotLoc.Ui("YOU");   // mark your own row so you can find yourself
+            _statsHost.AddChild(MakeLabel(row, 18, HorizontalAlignment.Left));
+            rank++;
+        }
+    }
+
+    /// <summary>A player's display name for the ranking: their REAL platform (Steam) name plus their
+    /// character, e.g. "inggom (Ironclad)". The Steam name is unique per person even when two players picked
+    /// the SAME character. Falls back gracefully to whichever part is available, then "?".</summary>
+    private static string PlayerName(Player p)
+    {
+        if (p == null) return "?";
+        string steam = null, chara = null;
+        try { steam = PlatformUtil.GetPlayerName(PlatformUtil.PrimaryPlatform, p.NetId); } catch { }
+        try { var ch = p.Character; chara = ch != null ? ch.Title.GetFormattedText() : null; } catch { }
+        if (string.IsNullOrWhiteSpace(steam)) steam = null;
+        if (string.IsNullOrWhiteSpace(chara)) chara = null;
+
+        if (steam != null && chara != null) return $"{steam} ({chara})";
+        return steam ?? chara ?? "?";
+    }
 
     private void RebuildPaytable()
     {
@@ -624,7 +706,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                     for (int c = 0; c < 3; c++)
                         _reels[c].SpinToColumn(roll.Grid[c, 0], roll.Grid[c, 1], roll.Grid[c, 2],
                                                12 + addSteps + c * 6, 0.8 + addDur + c * 0.6);
-                    _cabinet?.MirrorSpin(roll);   // the small cabinet spins in sync
+                    _cabinet?.MirrorSpin(roll, addSteps, addDur);   // small cabinet spins with the SAME timing → settles together
 
                     double wait = 0.8 + addDur + 2 * 0.6 + 0.25;   // outlast the last (right) reel
                     await ToSignal(tree.CreateTimer(wait), SceneTreeTimer.SignalName.Timeout);
@@ -632,7 +714,16 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                 }
             }
 
-            await ResolvePayout(roll, bet);
+            int potGold = await ResolvePayout(roll, bet);
+
+            // record the spin for the right-side record panel (personal always; party via the synced wire)
+            int relics = 0, jackpots = 0;
+            foreach (var g in roll.Grants) { if (g.IsJackpot) jackpots++; else relics++; }
+            // gold won = bingo gold + pool + the jackpot relic's self-pay (so the jackpot counts in the winnings rank)
+            int goldWon = roll.Gold + potGold + jackpots * SlotMachineState.JackpotSelfPayGold;
+            int bombs = roll.Bomb ? 1 : 0;
+            SlotStats.RecordLocal(bet, goldWon, relics, jackpots, bombs);
+            SlotNet.BroadcastStat(_player, bet, goldWon, relics, jackpots, bombs);   // no-op in single-player
         }
         catch (Exception e)
         {
@@ -647,9 +738,10 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
 
     /// <summary>Apply a spin's outcome — bomb bust / relic grant / gold — with the celebration effects.
     /// Shared by the automatic and manual paths (the grid it scores is built differently, the payout isn't).</summary>
-    private async Task ResolvePayout(SpinResult roll, int bet)
+    private async Task<int> ResolvePayout(SpinResult roll, int bet)
     {
         SceneTree tree = GetTree();
+        int potGold = 0;   // gold won from the shared pool this spin (returned so OnSpin can log the stat)
 
         if (roll.Bomb)
         {
@@ -661,7 +753,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                 else if (roll.MissedGold > 0)
                     _shower?.Burst(Mathf.Clamp(roll.MissedGold / 10, 4, 40), ShowerOrigin(), ReelIconSize, _shopCoinTex);
                 await ToSignal(tree.CreateTimer(0.55), SceneTreeTimer.SignalName.Timeout);
-                if (!Alive()) return;
+                if (!Alive()) return potGold;
                 Explode();   // scatters the just-spawned reward — snatched away
             }
             string bombMsg = roll.MissedRelic != null ? SlotLoc.Ui("BOMB_MISS_RELIC")
@@ -676,10 +768,11 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
             // the synced handler grants on the winner's client (returns the optimistic amount for display);
             // SP: WinPool resets the pot and returns the amount, granted inline here.
             int amt = SlotNet.WinPool(_player);
+            potGold = amt;
             if (!SlotNet.IsCoop && amt > 0)
             {
                 await PlayerCmd.GainGold(amt, _player);
-                if (!Alive()) return;
+                if (!Alive()) return potGold;
             }
             if (!SlotOptions.SkipCelebration) ShowerCoins(amt);
             SetResult(string.Format(SlotLoc.Ui("POOL_WON"), amt), Colors.Gold);
@@ -694,7 +787,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                 {
                     _shower?.Burst(14, ShowerOrigin(), ReelIconSize, roll.Grants[0].Icon);
                     await ToSignal(tree.CreateTimer(0.9), SceneTreeTimer.SignalName.Timeout);
-                    if (!Alive()) return;
+                    if (!Alive()) return potGold;
                 }
 
                 SetContentVisible(false);
@@ -716,7 +809,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                         }
                     }
                     catch (Exception ge) { MainFile.Logger.Warn($"[{MainFile.ModId}] grant failed: {ge.Message}"); }
-                    if (!Alive()) return;
+                    if (!Alive()) return potGold;
                 }
                 SetContentVisible(true);
                 _state.Refresh();
@@ -734,7 +827,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
                 if (!SlotOptions.SkipCelebration) ShowerCoins(roll.Gold);   // coins fountain out
                 await PlayerCmd.GainGold(roll.Gold, _player);               // gold counts up
                 SlotNet.SyncGoldGained(roll.Gold);                          // co-op: mirror the win onto the peer
-                if (!Alive()) return;
+                if (!Alive()) return potGold;
                 SetResult(string.Format(SlotLoc.Ui("BINGO_GOLD"), roll.Bingos, roll.Gold), Colors.Gold);
             }
             else
@@ -745,6 +838,7 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         }
 
         MainFile.Logger.Info($"[{MainFile.ModId}] spin bingos={roll.Bingos} gold={roll.Gold} grants={roll.Grants.Count} bomb={roll.Bomb}.");
+        return potGold;
     }
 
     /// <summary>Manual mode: start all three reels free-spinning, then wait while the player stops each one

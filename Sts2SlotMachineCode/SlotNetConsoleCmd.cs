@@ -21,6 +21,7 @@ namespace Sts2SlotMachine;
 /// <item><c>shop &lt;id&gt;…</c> — cache the sender's shop relic ids (union reel pool).</item>
 /// <item><c>take &lt;relicEntry&gt;</c> — peers clear that relic from their own shop (deplete) + toast the win.</item>
 /// <item><c>jackpot &lt;relicEntry&gt;</c> — announce a jackpot-relic win to the other players (toast only).</item>
+/// <item><c>stat &lt;bet&gt; &lt;goldWon&gt; &lt;relics&gt; &lt;jackpots&gt; &lt;bombs&gt;</c> — fold a spin into the party totals.</item>
 /// </list>
 ///
 /// Reuses the game's BUILT-IN <c>NetConsoleCmdGameAction</c> wire type (a plain string payload), so the
@@ -75,6 +76,16 @@ public sealed class SlotNetConsoleCmd : AbstractConsoleCmd
             case "jackpot":
                 if (args.Length >= 2) SlotNet.ApplyJackpotWon(issuingPlayer, args[1]);
                 return new CmdResult(success: true, "slot_sync jackpot");
+
+            case "stat":
+                if (args.Length >= 6
+                    && int.TryParse(args[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sBet)
+                    && int.TryParse(args[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sWon)
+                    && int.TryParse(args[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sRel)
+                    && int.TryParse(args[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sJack)
+                    && int.TryParse(args[5], NumberStyles.Integer, CultureInfo.InvariantCulture, out int sBomb))
+                    SlotNet.ApplyStat(issuingPlayer, sBet, sWon, sRel, sJack, sBomb);
+                return new CmdResult(success: true, "slot_sync stat");
 
             default:
                 return new CmdResult(success: true, $"slot_sync: unknown op '{op}'");

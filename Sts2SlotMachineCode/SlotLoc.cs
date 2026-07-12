@@ -54,6 +54,19 @@ internal static class SlotLoc
         // shown to every OTHER player (not the winner, not the shop it came from) — a plain "won it" notice
         ["UI.RELIC_WON_BY_PARTNER"] = ("A teammate won this relic!", "동료가 이 유물에 당첨되었습니다!", "队友中奖赢得了这件遗物！"),
         // partner hit the jackpot relic — broadcast to everyone else
+        // right-side record panel (personal block + co-op per-player rankings)
+        ["UI.STATS_ME"]        = ("My record", "내 기록", "我的记录"),
+        ["UI.STAT_BET"]        = ("Spent  {0}g", "사용한 돈  {0}골드", "已花费  {0}金币"),
+        ["UI.STAT_WON"]        = ("Won  {0}g", "얻은 돈  {0}골드", "已赢得  {0}金币"),
+        ["UI.STAT_NET"]        = ("Net  {0}g", "순익  {0}골드", "净收益  {0}金币"),
+        ["UI.STAT_BIGGEST"]    = ("Best win  {0}g", "최고 당첨  {0}골드", "最高中奖  {0}金币"),
+        ["UI.STAT_COUNTS"]     = ("Relics {0} · Jackpots {1} · Bombs {2}", "유물 {0} · 잭팟 {1} · 폭탄 {2}", "遗物 {0} · 大奖 {1} · 炸弹 {2}"),
+        // co-op per-player rankings
+        ["UI.STATS_RANK_BET"]  = ("Spending rank", "사용 금액 랭킹", "消费排行"),
+        ["UI.STATS_RANK_WON"]  = ("Winnings rank", "당첨 금액 랭킹", "中奖排行"),
+        ["UI.RANK_ROW"]        = ("{0}. {1}  {2}g", "{0}. {1}  {2}골드", "{0}. {1}  {2}金币"),
+        ["UI.YOU"]             = ("(You)", "(나)", "(你)"),
+
         ["UI.JACKPOT_WON_BY_PARTNER"] = ("A teammate hit the JACKPOT!", "동료가 잭팟에 당첨되었습니다!", "队友中了大奖！"),
         // partner won the shared prize pot ({0} = amount) — broadcast to everyone else
         ["UI.POOL_WON_BY_PARTNER"] = ("A teammate won the {0} prize pot!", "동료가 누적 상금 {0}에 당첨되었습니다!", "队友赢得了 {0} 累计奖金！"),

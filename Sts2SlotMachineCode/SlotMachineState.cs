@@ -70,6 +70,7 @@ internal sealed class SlotMachineState
     private const int PFull  = 2;    // 0.2%  → full grid gold
     private const int PBomb  = 10;   // 1.0%  → all rewards void (RTP unchanged: freed % just becomes a plain miss)
     private const int PJackpot = 2;  // 0.2%  → jackpot relic (SignetRing, self-pays 999g) — kept rare so RTP stays sane
+    internal const int JackpotSelfPayGold = 999;   // the SignetRing's self-grant — counted into the winnings stat
     private const int PPool = 30;    // 3.0%  → win the shared co-op pool (the whole accumulated pot; see SlotNet)
 
     // A relic outcome is available if EITHER shop (own or the co-op partner's) has a winnable relic.
@@ -127,6 +128,8 @@ internal sealed class SlotMachineState
                 st._jackpot = new SlotSymbol { Relic = sig, Id = sig.Id.Entry, IsJackpot = true, Icon = ic };
         }
         catch (Exception e) { MainFile.Logger.Warn($"[{MainFile.ModId}] jackpot relic (SignetRing) load failed: {e.Message}"); }
+        // new run / nobody owns it yet → clear any stale party-wide retire flag so the jackpot can reappear
+        if (st._jackpot != null) SlotNet.ClearJackpotRetiredIfUnowned(st._jackpot.Id);
         st.SampleFillers();
         st.Rebuild();
         return st;
@@ -290,7 +293,9 @@ internal sealed class SlotMachineState
     private bool PlayerOwnsJackpot()
     {
         if (_jackpot?.Relic == null) return false;
-        return SlotNet.AnyPlayerOwns(_jackpot.Id);
+        // JackpotRetired covers the co-op window before a peer's relic-obtain sync lands (so the symbol
+        // drops from every machine the instant someone wins, not one spin later).
+        return SlotNet.JackpotRetired || SlotNet.AnyPlayerOwns(_jackpot.Id);
     }
 
     /// <summary>A weighted symbol for a MANUAL free-spinning reel strip (bomb is rare here).</summary>

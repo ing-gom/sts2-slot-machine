@@ -178,14 +178,17 @@ internal sealed partial class MerchantSlotCabinet : Control
         SlotMachinePopup.Toggle(_player, back, shop, _state, this);
     }
 
-    /// <summary>Spin the resting cabinet's reels in sync with the popup's spin (same 3×3 grid).</summary>
-    internal void MirrorSpin(SpinResult r)
+    /// <summary>Spin the resting cabinet's reels in sync with the popup's spin (same 3×3 grid). Uses the
+    /// SAME step/duration formula as the popup (fed the same <paramref name="addSteps"/>/<paramref name="addDur"/>
+    /// from the lever pull) so both machines settle reel-for-reel at the same instant.</summary>
+    internal void MirrorSpin(SpinResult r, int addSteps, double addDur)
     {
         try
         {
             if (_reels.Length < 3) return;
             for (int c = 0; c < 3; c++)
-                _reels[c].SpinToColumn(r.Grid[c, 0], r.Grid[c, 1], r.Grid[c, 2], 20 + c * 4, 1.1 + c * 0.4);
+                _reels[c].SpinToColumn(r.Grid[c, 0], r.Grid[c, 1], r.Grid[c, 2],
+                                       12 + addSteps + c * 6, 0.8 + addDur + c * 0.6);
         }
         catch (Exception e) { MainFile.Logger.Warn($"[{MainFile.ModId}] cabinet mirror spin failed: {e.Message}"); }
     }

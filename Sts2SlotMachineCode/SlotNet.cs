@@ -219,12 +219,42 @@ internal static class SlotNet
         Dispatch(winner, $"jackpot {relicEntry}");
     }
 
-    /// <summary>Handler (every client): a partner won the jackpot → toast it on the non-winner clients.</summary>
+    /// <summary>Party-wide one-time jackpot: true once ANY player has won the jackpot relic, so it's dropped
+    /// from every machine's reels immediately — race-free, without waiting for the relic-obtain sync to land
+    /// on the peers (which is what left the symbol lingering on the others' reels). Cleared by
+    /// <see cref="ClearJackpotRetiredIfUnowned"/> when a fresh machine is built and nobody owns it (new run).</summary>
+    internal static bool JackpotRetired { get; private set; }
+
+    /// <summary>Handler (every client, incl. the winner's echo): retire the jackpot party-wide + refresh open
+    /// machines so the symbol vanishes from everyone's reels/paytable at once; toast the non-winners.</summary>
     internal static void ApplyJackpotWon(Player winner, string relicEntry)
     {
-        if (LocalContext.IsMe(winner)) return;
+        JackpotRetired = true;
+        try { ShopListChanged?.Invoke(); } catch { }   // open popups rebuild → jackpot symbol dropped
+        if (LocalContext.IsMe(winner)) return;          // the winner already gets their own celebration
         SlotToast.ShowJackpotWon(ResolveRelic(relicEntry));
     }
+
+    /// <summary>Clear the retire flag when a fresh machine is built and nobody owns the jackpot yet (a new
+    /// run) — so the jackpot can appear again. No-op mid-run after a win (the winner still owns it).</summary>
+    internal static void ClearJackpotRetiredIfUnowned(string jackpotEntry)
+    {
+        if (JackpotRetired && !AnyPlayerOwns(jackpotEntry)) JackpotRetired = false;
+    }
+
+    // ---- run statistics (party total) ----
+
+    /// <summary>Broadcast a just-resolved spin's outcome so every client folds it into the PARTY totals in
+    /// queue order (co-op only). The acting player's PERSONAL total is tracked locally, not here.</summary>
+    internal static void BroadcastStat(Player player, int bet, int goldWon, int relics, int jackpots, int bombs)
+    {
+        if (!IsCoop) return;
+        Dispatch(player, $"stat {bet} {goldWon} {relics} {jackpots} {bombs}");
+    }
+
+    /// <summary>Handler (every client): fold a spin (a peer's, or our own echo) into that player's total.</summary>
+    internal static void ApplyStat(Player player, int bet, int goldWon, int relics, int jackpots, int bombs)
+        => SlotStats.RecordParty(player, bet, goldWon, relics, jackpots, bombs);
 
     /// <summary>Remove a relic id from every cached peer shop list (a won/depleted relic leaves the union
     /// reel pool) and notify any open machine to rebuild its reels + paytable. Runs on all clients so the
