@@ -18,7 +18,9 @@ namespace Sts2SlotMachine;
 /// </summary>
 internal sealed partial class SpectatorCabinet : Control
 {
-    private const float DisplayH = 150f;                       // a touch smaller than the player's own cabinet
+    // Same height as the player's own cabinet (shared constant): the old "touch smaller" 150 made the
+    // same machine render a different size on every peer's screen — reported as a per-player size bug.
+    private const float DisplayH = MerchantSlotCabinet.RowDisplayH;
 
     private readonly NMerchantRoom _room;
     private readonly Player _owner;
@@ -107,12 +109,17 @@ internal sealed partial class SpectatorCabinet : Control
         var skin = SkinCatalog.Get(SlotNet.PeerSkin(_owner));
         Texture2D? cabTex = SlotArt.LoadPng(skin.CabinetFile) ?? SlotArt.LoadPng("slot_machine_cabinet.png");
         if (cabTex == null) return false;
+        // ★ExpandMode BEFORE Size (C# object initializers assign in written order): with the default
+        // ExpandMode (KeepSize) the control's minimum size IS the texture's natural size, so a Size
+        // assigned first gets clamped UP to 260×430 and stays there — the spectator cabinet rendered
+        // at full texture size while its Control box said 180, i.e. the reported "slot machine size
+        // differs per player" bug (own cabinet 180 vs teammate's 430 on every peer's screen).
         _visualHost.AddChild(new TextureRect
         {
             Texture = cabTex,
-            Size = new Vector2(_w, _h),
-            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+            Size = new Vector2(_w, _h),
             MouseFilter = MouseFilterEnum.Ignore,
             Modulate = new Color(0.85f, 0.85f, 0.9f),   // slightly dimmed → reads as "someone else's"
         });

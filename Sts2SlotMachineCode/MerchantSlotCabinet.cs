@@ -22,7 +22,13 @@ namespace Sts2SlotMachine;
 /// </summary>
 internal sealed partial class MerchantSlotCabinet : Control
 {
-    private const float DisplayH = 180f;                       // on-screen cabinet height (small)
+    /// <summary>On-screen cabinet height — SHARED by the player cabinet and the co-op spectator
+    /// cabinets. They must be equal: the spectators used to be "a touch smaller" (150), which read
+    /// as a desync to players — each peer saw its OWN machine bigger, so the same machine had a
+    /// different size on every screen (reported as "the slot machine size differs per player").
+    /// Ownership is still obvious from the dim tint + name header + non-interactivity.</summary>
+    internal const float RowDisplayH = 180f;
+    private const float DisplayH = RowDisplayH;
     private static readonly System.Random Rng = new();
 
     private NMerchantRoom _room = null!;

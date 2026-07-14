@@ -125,9 +125,12 @@ internal sealed partial class SlotMachinePopup : CanvasLayer
         _cabTexRect = new TextureRect
         {
             Position = Vector2.Zero,
-            Size = new Vector2(mw, mh),
-            StretchMode = TextureRect.StretchModeEnum.Scale,
+            // ExpandMode BEFORE Size — initializers assign in written order; a Size set under the
+            // default KeepSize gets clamped up to the texture's natural size (the SpectatorCabinet
+            // size bug's exact trap).
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            Size = new Vector2(mw, mh),
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         machine.AddChild(_cabTexRect);

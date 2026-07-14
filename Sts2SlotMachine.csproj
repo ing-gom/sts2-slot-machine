@@ -6,6 +6,16 @@
         <AssemblyName>Sts2SlotMachine</AssemblyName>
     </PropertyGroup>
 
+    <!-- coop-verify self-test compiles ONLY in Debug — a Release build (the deploy) strips the test
+         code and its ArmIfRequested call entirely, so a stale selftest flag can never hijack a run
+         (the Sts2NetWorth lesson). Same pattern as Sts2RelicForge / Sts2RelicTransmute. -->
+    <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+        <DefineConstants>$(DefineConstants);SLOTMACHINE_SELFTEST</DefineConstants>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(Configuration)' != 'Debug'">
+        <Compile Remove="Sts2SlotMachineCode/SlotCoopTest.cs" />
+    </ItemGroup>
+
     <!-- Loose runtime-loaded art (cabinet / hover glow / lever), loaded next to the DLL so it can be
          swapped without a rebuild. Copied only if absent, so a user's replaced art isn't overwritten. -->
     <Target Name="CopySlotArtToModsFolder" AfterTargets="Sts2ModKit_CopyToModsFolder">
